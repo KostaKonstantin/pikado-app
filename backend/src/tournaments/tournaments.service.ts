@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Tournament } from './entities/tournament.entity';
 import { TournamentPlayer } from './entities/tournament-player.entity';
+import { Match } from '../matches/entities/match.entity';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { BracketService } from './bracket.service';
 import { TournamentStatus, TournamentFormat } from '../common/enums';
@@ -20,6 +21,7 @@ export class TournamentsService {
   constructor(
     @InjectRepository(Tournament) private tournamentRepo: Repository<Tournament>,
     @InjectRepository(TournamentPlayer) private tpRepo: Repository<TournamentPlayer>,
+    @InjectRepository(Match) private matchRepo: Repository<Match>,
     private bracketService: BracketService,
   ) {}
 
@@ -57,6 +59,8 @@ export class TournamentsService {
 
   async remove(clubId: string, id: string) {
     await this.findOne(clubId, id);
+    await this.matchRepo.delete({ tournamentId: id });
+    await this.tpRepo.delete({ tournamentId: id });
     await this.tournamentRepo.delete({ id, clubId });
   }
 

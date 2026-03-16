@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation';
 import { useAuthStore } from '@/store/auth.store';
 import { playersApi } from '@/lib/api/players.api';
 import { Topbar } from '@/components/layout/topbar';
-import { ArrowLeft, Trophy, Swords, Target } from 'lucide-react';
+import { ArrowLeft, Trophy, Swords, Target, Pencil, X, Check } from 'lucide-react';
 import Link from 'next/link';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
@@ -16,6 +16,9 @@ export default function PlayerDetailPage() {
   const [stats, setStats] = useState<any>(null);
   const [history, setHistory] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState({ fullName: '', nickname: '', country: '' });
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!club?.id) return;
@@ -24,11 +27,26 @@ export default function PlayerDetailPage() {
       playersApi.getStats(club.id, id),
       playersApi.getHistory(club.id, id),
     ]).then(([p, s, h]) => {
-      setPlayer(p);
-      setStats(s);
-      setHistory(h);
+      setPlayer(p); setStats(s); setHistory(h);
     }).finally(() => setLoading(false));
   }, [club?.id, id]);
+
+  const startEdit = () => {
+    setEditForm({ fullName: player.fullName, nickname: player.nickname || '', country: player.country || '' });
+    setEditing(true);
+  };
+
+  const saveEdit = async () => {
+    if (!club?.id) return;
+    setSaving(true);
+    try {
+      const updated = await playersApi.update(club.id, id, editForm);
+      setPlayer(updated);
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   if (loading) return <div className="flex items-center justify-center h-64 text-slate-400">Učitavanje...</div>;
   if (!player) return null;
@@ -48,15 +66,53 @@ export default function PlayerDetailPage() {
         </Link>
 
         {/* Profile Card */}
-        <div className="card p-6 flex items-center gap-6">
-          <div className="w-20 h-20 rounded-full bg-orange-500/20 border-2 border-orange-500/30 flex items-center justify-center text-3xl font-bold text-orange-400">
-            {player.fullName[0]}
-          </div>
-          <div>
-            <h2 className="text-2xl font-bold text-white">{player.fullName}</h2>
-            {player.nickname && <p className="text-slate-400">"{player.nickname}"</p>}
-            {player.country && <p className="text-sm text-slate-500 mt-1">{player.country}</p>}
-          </div>
+        <div className="card p-6">
+          {!editing ? (
+            <div className="flex items-center gap-6">
+              <div className="w-20 h-20 rounded-full bg-orange-500/20 border-2 border-orange-500/30 flex items-center justify-center text-3xl font-bold text-orange-400 shrink-0">
+                {player.fullName[0]}
+              </div>
+              <div className="flex-1">
+                <h2 className="text-2xl font-bold text-white">{player.fullName}</h2>
+                {player.nickname && <p className="text-slate-400">"{player.nickname}"</p>}
+                {player.country && <p className="text-sm text-slate-500 mt-1">{player.country}</p>}
+              </div>
+              <button onClick={startEdit} className="p-2 text-slate-400 hover:text-orange-400 transition-colors" title="Uredi igrača">
+                <Pencil className="w-5 h-5" />
+              </button>
+            </div>
+          ) : (
+            <div>
+              <p className="text-sm font-medium text-slate-300 mb-4">Uredi igrača</p>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Ime i prezime *</label>
+                  <input className="input-field" value={editForm.fullName}
+                    onChange={(e) => setEditForm((f) => ({ ...f, fullName: e.target.value }))} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Nadimak</label>
+                    <input className="input-field" value={editForm.nickname} placeholder="Opcionalno"
+                      onChange={(e) => setEditForm((f) => ({ ...f, nickname: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Zemlja</label>
+                    <input className="input-field" value={editForm.country} placeholder="Opcionalno"
+                      onChange={(e) => setEditForm((f) => ({ ...f, country: e.target.value }))} />
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-2 mt-4">
+                <button onClick={saveEdit} disabled={saving || !editForm.fullName.trim()} className="btn-primary text-sm flex items-center gap-1.5">
+                  <Check className="w-4 h-4" /> {saving ? 'Čuvanje...' : 'Sačuvaj'}
+                </button>
+                <button onClick={() => setEditing(false)} className="btn-secondary text-sm flex items-center gap-1.5">
+                  <X className="w-4 h-4" /> Otkaži
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Stats */}

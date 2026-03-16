@@ -46,6 +46,18 @@ export class LeagueMatch {
   @Column({ name: 'round_number' })
   roundNumber: number;
 
+  @Column({ name: 'session_number', default: 1 })
+  sessionNumber: number;
+
+  @Column({ name: 'match_order', default: 0 })
+  matchOrder: number;
+
+  @Column({ name: 'scheduled_date', type: 'timestamptz', nullable: true })
+  scheduledDate: Date | null;
+
+  @Column({ name: 'is_postponed', default: false })
+  isPostponed: boolean;
+
   @Column({ nullable: true })
   slug: string;
 

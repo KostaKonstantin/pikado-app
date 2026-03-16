@@ -48,10 +48,10 @@ export class MatchesService {
     await this.matchRepo.update(id, {
       player1Score: 0,
       player2Score: 0,
-      winnerId: null,
+      winnerId: undefined,
       status: MatchStatus.PENDING,
-      startedAt: null,
-      completedAt: null,
+      startedAt: undefined,
+      completedAt: undefined,
     });
     return this.findOne(id);
   }

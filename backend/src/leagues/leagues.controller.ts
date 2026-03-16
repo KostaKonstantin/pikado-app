@@ -84,4 +84,37 @@ export class LeaguesController {
   ) {
     return this.leaguesService.updateMatchResult(clubId, id, matchId, body.homeSets, body.awaySets);
   }
+
+  @Post(':id/evenings/:eveningNum/preview-substitutions')
+  @Roles(ClubRole.CLUB_ADMIN, ClubRole.ORGANIZER)
+  previewSubstitutions(
+    @Param('clubId') clubId: string,
+    @Param('id') id: string,
+    @Param('eveningNum') eveningNum: string,
+    @Body() body: { substitutions: { absentId: string; substituteId: string }[] },
+  ) {
+    return this.leaguesService.previewSubstitutions(clubId, id, parseInt(eveningNum), body.substitutions);
+  }
+
+  @Post(':id/evenings/:eveningNum/apply-substitutions')
+  @Roles(ClubRole.CLUB_ADMIN, ClubRole.ORGANIZER)
+  applySubstitutions(
+    @Param('clubId') clubId: string,
+    @Param('id') id: string,
+    @Param('eveningNum') eveningNum: string,
+    @Body() body: { substitutions: { absentId: string; substituteId: string }[] },
+  ) {
+    return this.leaguesService.applySubstitutions(clubId, id, parseInt(eveningNum), body.substitutions);
+  }
+
+  @Patch(':id/matches/:matchId/postpone')
+  @Roles(ClubRole.CLUB_ADMIN, ClubRole.ORGANIZER)
+  postponeMatch(
+    @Param('clubId') clubId: string,
+    @Param('id') id: string,
+    @Param('matchId') matchId: string,
+    @Body() body: { scheduledDate?: string | null; isPostponed?: boolean },
+  ) {
+    return this.leaguesService.postponeMatch(clubId, id, matchId, body);
+  }
 }

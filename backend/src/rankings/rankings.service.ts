@@ -95,7 +95,7 @@ export class RankingsService {
       {
         clubId,
         playerId,
-        seasonId,
+        seasonId: seasonId ?? undefined,
         points,
         matchesPlayed: played,
         matchesWon: wins,

@@ -20,9 +20,11 @@ interface AuthState {
   token: string | null;
   role: string | null;
   isAuthenticated: boolean;
+  _hasHydrated: boolean;
   setAuth: (user: User, club: Club | null, token: string, role: string) => void;
   setClub: (club: Club) => void;
   logout: () => void;
+  setHasHydrated: (val: boolean) => void;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -33,6 +35,8 @@ export const useAuthStore = create<AuthState>()(
       token: null,
       role: null,
       isAuthenticated: false,
+      _hasHydrated: false,
+      setHasHydrated: (val) => set({ _hasHydrated: val }),
       setAuth: (user, club, token, role) => {
         if (typeof window !== 'undefined') localStorage.setItem('token', token);
         set({ user, club, token, role, isAuthenticated: true });
@@ -45,6 +49,9 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'pikado-auth',
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true);
+      },
       partialize: (state) => ({
         user: state.user,
         club: state.club,

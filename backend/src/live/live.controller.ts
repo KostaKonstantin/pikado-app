@@ -35,7 +35,7 @@ export class LiveController {
     const rounds = new Map<number, Match[]>();
     for (const m of matches) {
       if (!rounds.has(m.round)) rounds.set(m.round, []);
-      rounds.get(m.round).push(m);
+      rounds.get(m.round)!.push(m);
     }
 
     const bracket = Array.from(rounds.entries()).map(([round, ms]) => ({ round, matches: ms }));

@@ -84,29 +84,29 @@ export default function NewLeaguePage() {
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-1.5">Setova po meču</label>
                 <input type="number" className="input-field" min={1} max={9} value={form.setsPerMatch}
-                  onChange={(e) => setForm({ ...form, setsPerMatch: parseInt(e.target.value) })} />
+                  onChange={(e) => setForm({ ...form, setsPerMatch: parseInt(e.target.value) || 1 })} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-1.5">Legova po setu</label>
                 <input type="number" className="input-field" min={1} max={11} value={form.legsPerSet}
-                  onChange={(e) => setForm({ ...form, legsPerSet: parseInt(e.target.value) })} />
+                  onChange={(e) => setForm({ ...form, legsPerSet: parseInt(e.target.value) || 1 })} />
               </div>
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-1.5">Bodovi – Pobeda</label>
                 <input type="number" className="input-field" min={0} value={form.pointsWin}
-                  onChange={(e) => setForm({ ...form, pointsWin: parseInt(e.target.value) })} />
+                  onChange={(e) => setForm({ ...form, pointsWin: parseInt(e.target.value) || 0 })} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-1.5">Bodovi – Remi</label>
                 <input type="number" className="input-field" min={0} value={form.pointsDraw}
-                  onChange={(e) => setForm({ ...form, pointsDraw: parseInt(e.target.value) })} />
+                  onChange={(e) => setForm({ ...form, pointsDraw: parseInt(e.target.value) || 0 })} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-1.5">Bodovi – Poraz</label>
                 <input type="number" className="input-field" min={0} value={form.pointsLoss}
-                  onChange={(e) => setForm({ ...form, pointsLoss: parseInt(e.target.value) })} />
+                  onChange={(e) => setForm({ ...form, pointsLoss: parseInt(e.target.value) || 0 })} />
               </div>
             </div>
             <div className="flex gap-3 pt-2">

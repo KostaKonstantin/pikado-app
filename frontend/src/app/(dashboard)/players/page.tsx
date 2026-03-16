@@ -4,13 +4,28 @@ import Link from 'next/link';
 import { useAuthStore } from '@/store/auth.store';
 import { playersApi } from '@/lib/api/players.api';
 import { Topbar } from '@/components/layout/topbar';
-import { Users, Plus, Search, ChevronRight } from 'lucide-react';
+import { Users, Plus, Search, ChevronRight, Trash2 } from 'lucide-react';
 
 export default function PlayersPage() {
   const { club } = useAuthStore();
   const [players, setPlayers] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!club?.id) return;
+    if (!confirm(`Obrisati igrača "${name}"? Ova akcija se ne može poništiti.`)) return;
+    setDeletingId(id);
+    try {
+      await playersApi.remove(club.id, id);
+      setPlayers((prev) => prev.filter((p) => p.id !== id));
+    } catch {
+      alert('Greška pri brisanju igrača');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   useEffect(() => {
     if (!club?.id) return;
@@ -36,7 +51,7 @@ export default function PlayersPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
             type="text"
-            className="input-field pl-9"
+            className="input-field pl-9!"
             placeholder="Pretraži igrače..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -70,7 +85,7 @@ export default function PlayersPage() {
                   <th className="text-left text-xs font-medium text-slate-400 px-6 py-3">Igrač</th>
                   <th className="text-left text-xs font-medium text-slate-400 px-6 py-3">Nadimak</th>
                   <th className="text-left text-xs font-medium text-slate-400 px-6 py-3">Zemlja</th>
-                  <th className="w-10" />
+                  <th className="w-24" />
                 </tr>
               </thead>
               <tbody>
@@ -87,9 +102,19 @@ export default function PlayersPage() {
                     <td className="px-6 py-3 text-slate-400">{p.nickname || '—'}</td>
                     <td className="px-6 py-3 text-slate-400">{p.country || '—'}</td>
                     <td className="px-3 py-3">
-                      <Link href={`/players/${p.id}`} className="text-slate-500 hover:text-orange-400">
-                        <ChevronRight className="w-4 h-4" />
-                      </Link>
+                      <div className="flex items-center gap-1 justify-end">
+                        <button
+                          onClick={() => handleDelete(p.id, p.fullName)}
+                          disabled={deletingId === p.id}
+                          className="p-1.5 text-slate-500 hover:text-red-400 transition-colors disabled:opacity-50"
+                          title="Obriši igrača"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                        <Link href={`/players/${p.id}`} className="p-1.5 text-slate-500 hover:text-orange-400">
+                          <ChevronRight className="w-4 h-4" />
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))}

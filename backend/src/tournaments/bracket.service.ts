@@ -63,11 +63,11 @@ export class BracketService {
         tournamentId,
         round: 1,
         matchNumber: i + 1,
-        player1Id: p1?.playerId || null,
-        player2Id: p2?.playerId || null,
+        player1Id: p1?.playerId ?? undefined,
+        player2Id: p2?.playerId ?? undefined,
         isBye,
         status: isBye ? MatchStatus.BYE : MatchStatus.PENDING,
-        winnerId: isBye ? (p1?.playerId || p2?.playerId) : null,
+        winnerId: isBye ? (p1?.playerId ?? p2?.playerId ?? undefined) : undefined,
       });
       round1Matches.push(match);
     }
@@ -172,7 +172,7 @@ export class BracketService {
     tournamentId: string,
     players: TournamentPlayer[],
   ): Promise<Match[]> {
-    const ids = players.map((p) => p.playerId);
+    const ids: (string | null)[] = players.map((p) => p.playerId);
     // Add virtual BYE if odd
     if (ids.length % 2 !== 0) ids.push(null);
     const n = ids.length;
@@ -197,7 +197,7 @@ export class BracketService {
         );
       }
       // Rotate (keep first fixed)
-      ids.splice(1, 0, ids.pop());
+      ids.splice(1, 0, ids.pop() ?? null);
     }
 
     return this.matchRepo.save(matches);
@@ -226,7 +226,7 @@ export class BracketService {
     const rounds = new Map<number, Match[]>();
     for (const m of matches) {
       if (!rounds.has(m.round)) rounds.set(m.round, []);
-      rounds.get(m.round).push(m);
+      rounds.get(m.round)!.push(m);
     }
 
     return Array.from(rounds.entries()).map(([round, matches]) => ({

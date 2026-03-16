@@ -36,4 +36,13 @@ export const leaguesApi = {
 
   updateMatch: (clubId: string, leagueId: string, matchId: string, homeSets: number, awaySets: number) =>
     api.patch(`/clubs/${clubId}/leagues/${leagueId}/matches/${matchId}`, { homeSets, awaySets }).then((r) => r.data),
+
+  postponeMatch: (clubId: string, leagueId: string, matchId: string, data: { scheduledDate?: string | null; isPostponed?: boolean }) =>
+    api.patch(`/clubs/${clubId}/leagues/${leagueId}/matches/${matchId}/postpone`, data).then((r) => r.data),
+
+  previewSubstitutions: (clubId: string, leagueId: string, eveningNum: number, substitutions: { absentId: string; substituteId: string }[]) =>
+    api.post(`/clubs/${clubId}/leagues/${leagueId}/evenings/${eveningNum}/preview-substitutions`, { substitutions }).then((r) => r.data),
+
+  applySubstitutions: (clubId: string, leagueId: string, eveningNum: number, substitutions: { absentId: string; substituteId: string }[]) =>
+    api.post(`/clubs/${clubId}/leagues/${leagueId}/evenings/${eveningNum}/apply-substitutions`, { substitutions }).then((r) => r.data),
 };
