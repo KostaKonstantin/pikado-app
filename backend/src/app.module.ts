@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
 import { ClubsModule } from './clubs/clubs.module';
 import { PlayersModule } from './players/players.module';
 import { SeasonsModule } from './seasons/seasons.module';
@@ -43,6 +44,7 @@ import { Ranking } from './rankings/entities/ranking.entity';
       ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
     }),
     AuthModule,
+    UsersModule,
     ClubsModule,
     PlayersModule,
     SeasonsModule,

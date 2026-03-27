@@ -54,10 +54,23 @@ export function Sidebar() {
           className="flex items-center h-14 md:h-16 shrink-0 px-4 gap-3"
           style={{ borderBottom: '1px solid var(--border)' }}
         >
-          {/* Logo icon — always present, centered when collapsed */}
-          <div className={`gradient-accent rounded-lg flex items-center justify-center shrink-0 w-8 h-8 ${c ? 'mx-auto' : ''}`}>
-            <Target className="w-4 h-4 text-white" />
-          </div>
+          {/* Club logo / fallback icon — always present, centered when collapsed */}
+          {(() => {
+            const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3099';
+            const logoSrc = club?.logoUrl ? `${API_URL}${club.logoUrl}` : null;
+            const initials = club?.name?.slice(0, 2).toUpperCase() || 'PK';
+            return (
+              <div className={`shrink-0 w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center ${c ? 'mx-auto' : ''}`}>
+                {logoSrc ? (
+                  <img src={logoSrc} alt={club?.name} className="w-full h-full object-contain" />
+                ) : (
+                  <div className="gradient-accent w-full h-full flex items-center justify-center">
+                    <Target className="w-4 h-4 text-white" />
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Text — expanded only */}
           {!c && (
