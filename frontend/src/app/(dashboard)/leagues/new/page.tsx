@@ -12,13 +12,14 @@ export default function NewLeaguePage() {
   const { club } = useAuthStore();
   const [form, setForm] = useState({
     name: '',
-    format: 'single',
+    mode: 'round',          // 'round' = kola (full schedule); 'session' = večeri (flexible)
+    format: 'home_away',   // §3: двокружни систем (double round-robin)
     setsPerMatch: 1,
-    legsPerSet: 3,
-    startingScore: 501,
-    pointsWin: 2,
-    pointsDraw: 1,
-    pointsLoss: 0,
+    legsPerSet: 4,          // §4: meč do 4 dobijenih lega
+    startingScore: 501,     // §11: igra se po pravilima 501
+    pointsWin: 2,           // §5
+    pointsDraw: 1,          // §5
+    pointsLoss: 0,          // §5
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -48,6 +49,27 @@ export default function NewLeaguePage() {
           <h2 className="text-xl font-semibold text-white mb-6">Kreiraj Ligu</h2>
           {error && <div className="bg-red-500/10 border border-red-500/30 text-red-400 rounded-lg p-3 mb-4 text-sm">{error}</div>}
           <form onSubmit={handleSubmit} className="space-y-5">
+
+            {/* Mode */}
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">Tip lige</label>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { value: 'round', label: 'Kola (Klasično)', desc: 'Ceo raspored generisan unapred. Podržava zamene igrača.' },
+                  { value: 'session', label: 'Večeri (Fleksibilno)', desc: 'Mečevi se generišu svake večeri prema prisutnim igračima.' },
+                ].map((m) => (
+                  <label key={m.value} className={`flex flex-col p-3 rounded-lg border cursor-pointer transition-colors ${
+                    form.mode === m.value ? 'border-orange-500 bg-orange-500/10' : 'border-slate-700 hover:border-slate-600'
+                  }`}>
+                    <input type="radio" name="mode" value={m.value} checked={form.mode === m.value}
+                      onChange={(e) => setForm({ ...form, mode: e.target.value })} className="sr-only" />
+                    <span className="text-sm font-medium text-white">{m.label}</span>
+                    <span className="text-xs text-slate-400 mt-0.5">{m.desc}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-1.5">Naziv *</label>
               <input type="text" className="input-field" placeholder="Zimska Liga 2025" value={form.name}

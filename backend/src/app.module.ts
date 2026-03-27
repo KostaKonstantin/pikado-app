@@ -23,6 +23,8 @@ import { Match } from './matches/entities/match.entity';
 import { League } from './leagues/entities/league.entity';
 import { LeaguePlayer } from './leagues/entities/league-player.entity';
 import { LeagueMatch } from './leagues/entities/league-match.entity';
+import { LeagueSession } from './leagues/entities/league-session.entity';
+import { LeagueSubstitution } from './leagues/entities/league-substitution.entity';
 import { Ranking } from './rankings/entities/ranking.entity';
 
 @Module({
@@ -34,7 +36,7 @@ import { Ranking } from './rankings/entities/ranking.entity';
       entities: [
         User, Club, Membership, Player, Season,
         Tournament, TournamentPlayer, Match,
-        League, LeaguePlayer, LeagueMatch, Ranking,
+        League, LeaguePlayer, LeagueMatch, LeagueSession, LeagueSubstitution, Ranking,
       ],
       synchronize: true,
       logging: process.env.NODE_ENV === 'development',

@@ -10,6 +10,7 @@ import {
 import { League } from './league.entity';
 import { Player } from '../../players/entities/player.entity';
 import { MatchStatus } from '../../common/enums';
+import { LeagueSession } from './league-session.entity';
 
 @Entity('league_matches')
 export class LeagueMatch {
@@ -73,8 +74,39 @@ export class LeagueMatch {
   @JoinColumn({ name: 'away_player_id' })
   awayPlayer: Player;
 
+  @ManyToOne(() => Player, { nullable: true })
+  @JoinColumn({ name: 'home_substitute_for_id' })
+  homeSubstituteFor: Player;
+
+  @ManyToOne(() => Player, { nullable: true })
+  @JoinColumn({ name: 'away_substitute_for_id' })
+  awaySubstituteFor: Player;
+
+  /** FK to LeagueSession — null means the match is in the unassigned pool */
+  @Column({ name: 'session_id', nullable: true, type: 'uuid' })
+  sessionId: string | null;
+
+  @ManyToOne(() => LeagueSession, (s) => s.matches, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'session_id' })
+  session: LeagueSession;
+
+  @Column({ name: 'is_walkover', default: false })
+  isWalkover: boolean;
+
   @Column({ name: 'played_at', nullable: true })
   playedAt: Date;
+
+  /** ID of the original player if home player is a substitute replacing someone */
+  @Column({ name: 'home_substitute_for_id', nullable: true })
+  homeSubstituteForId: string | null;
+
+  /** ID of the original player if away player is a substitute replacing someone */
+  @Column({ name: 'away_substitute_for_id', nullable: true })
+  awaySubstituteForId: string | null;
+
+  /** True if this match was newly created as a result of a substitution */
+  @Column({ name: 'is_substitution_match', default: false })
+  isSubstitutionMatch: boolean;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

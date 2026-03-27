@@ -1,17 +1,20 @@
 'use client';
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/auth.store';
+import { useSidebarStore } from '@/store/sidebar.store';
 import { Sidebar } from '@/components/layout/sidebar';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, _hasHydrated } = useAuthStore();
+  const { close, isCollapsed } = useSidebarStore();
   const router = useRouter();
+  const pathname = usePathname();
+
+  useEffect(() => { close(); }, [pathname]);
 
   useEffect(() => {
-    if (_hasHydrated && !isAuthenticated) {
-      router.push('/login');
-    }
+    if (_hasHydrated && !isAuthenticated) router.push('/login');
   }, [isAuthenticated, _hasHydrated, router]);
 
   if (!_hasHydrated) return null;
@@ -20,7 +23,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex min-h-screen">
       <Sidebar />
-      <main className="ml-64 flex-1 min-h-screen">
+      <main
+        className={`flex-1 min-h-screen w-full min-w-0 transition-all duration-300 ease-in-out ${
+          isCollapsed ? 'lg:ml-16' : 'lg:ml-64'
+        }`}
+      >
         {children}
       </main>
     </div>

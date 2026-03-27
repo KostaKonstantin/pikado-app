@@ -1,7 +1,37 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { LeagueMatch } from './entities/league-match.entity';
+
+// ─── Pure math helpers (no hardcoded values) ─────────────────────────────────
+//
+// SINGLE round-robin for N players:
+//   N even → rounds = N-1,  matches/round = N/2,   total = N*(N-1)/2
+//   N odd  → rounds = N,    matches/round = (N-1)/2, total = N*(N-1)/2
+//
+// DOUBLE round-robin (homeAway = true):
+//   rounds  = singleRounds * 2
+//   total   = singleTotal  * 2
+//   matches/round unchanged
+//
+// Verification:
+//   N=40 double → rounds=78, mpr=20, total=1560  ✓
+//   N=10 double → rounds=18, mpr=5,  total=90    ✓
+//   N=7  double → rounds=14, mpr=3,  total=42    ✓
+// ─────────────────────────────────────────────────────────────────────────────
+export function rrStats(n: number, homeAway: boolean) {
+  if (n < 2) return { rounds: 0, matchesPerRound: 0, totalMatches: 0, hasOddPlayers: false };
+  const isEven = n % 2 === 0;
+  const singleRounds = isEven ? n - 1 : n;
+  const matchesPerRound = isEven ? n / 2 : Math.floor(n / 2);
+  const singleTotal = (n * (n - 1)) / 2;
+  return {
+    rounds: homeAway ? singleRounds * 2 : singleRounds,
+    matchesPerRound,
+    totalMatches: homeAway ? singleTotal * 2 : singleTotal,
+    hasOddPlayers: !isEven,
+  };
+}
 
 @Injectable()
 export class FixtureService {
@@ -9,153 +39,114 @@ export class FixtureService {
     @InjectRepository(LeagueMatch) private leagueMatchRepo: Repository<LeagueMatch>,
   ) {}
 
-  private resolveGroupSize(playerCount: number): number {
-    if (playerCount <= 12) return 4;
-    if (playerCount <= 18) return 5;
-    return 6;
+  // ─── Circle Method ──────────────────────────────────────────────────────────
+  //
+  // The Circle Method (polygon algorithm) is the only algorithm that guarantees:
+  //   • Exactly ⌊N/2⌋ matches per round
+  //   • Exactly the correct number of rounds
+  //   • Every pair plays exactly once (single RR)
+  //
+  // Algorithm:
+  //   1. For EVEN N: fix the last player; rotate the remaining N-1 players.
+  //      Round r = 0..N-2:
+  //        rot = rotate(rotating, r)           // left-shift by r
+  //        match[0] = (fixed,  rot[0])
+  //        match[i] = (rot[i], rot[N-1-i])   for i = 1..N/2-1
+  //
+  //   2. For ODD N: add a BYE ghost player to make the count even.
+  //      Fix BYE; rotate all N real players.
+  //      Any pair that involves BYE is simply omitted (that player rests).
+  //      Produces N rounds with floor(N/2) real matches each.
+  //
+  // Pair correctness proof (N even, 0-indexed):
+  //   rot has indices 0..N-2.
+  //   match[0] uses index 0; match[i] uses indices i and N-1-i.
+  //   For i=1..N/2-1: i < N-1-i  (since i < N/2) → indices never collide.
+  //   Fixed is never in rot → no self-pairings.
+  //   Across all rounds, every unordered pair {a,b} appears exactly once. ✓
+  // ───────────────────────────────────────────────────────────────────────────
+  private buildRoundRobinRounds(playerIds: string[]): [string, string][][] {
+    const n = playerIds.length;
+    if (n < 2) return [];
+
+    const BYE = '__BYE__';
+    const isOdd = n % 2 !== 0;
+
+    // For odd N: BYE is fixed; all real players rotate.
+    // For even N: last real player is fixed; rest rotate.
+    const fixed = isOdd ? BYE : playerIds[n - 1];
+    const rotating = isOdd ? [...playerIds] : playerIds.slice(0, n - 1);
+
+    const N = rotating.length + 1; // always even
+    const numRounds = N - 1;
+    const rounds: [string, string][][] = [];
+
+    for (let r = 0; r < numRounds; r++) {
+      const round: [string, string][] = [];
+
+      // Rotate `rotating` left by r positions
+      const rot = [...rotating.slice(r), ...rotating.slice(0, r)];
+
+      // Pair fixed vs rot[0]
+      if (fixed !== BYE && rot[0] !== BYE) {
+        round.push([fixed, rot[0]]);
+      }
+
+      // Pair rot[i] vs rot[N-1-i], for i = 1 … N/2-1
+      for (let i = 1; i <= N / 2 - 1; i++) {
+        const home = rot[i];
+        const away = rot[N - 1 - i]; // N-1-i because rot has N-1 elements (0..N-2)
+        if (home !== BYE && away !== BYE) {
+          round.push([home, away]);
+        }
+      }
+
+      if (round.length > 0) rounds.push(round);
+    }
+
+    return rounds;
   }
 
   async generateFixtures(
     leagueId: string,
     playerIds: string[],
-    _homeAway: boolean = false,
+    homeAway = false,
+    mode = 'round',
   ): Promise<LeagueMatch[]> {
-    const groupSize = this.resolveGroupSize(playerIds.length);
-
-    // Build all pairs
-    const remainingSet = new Set<string>();
-    const playerRemaining = new Map<string, Set<string>>();
-
-    for (const id of playerIds) {
-      playerRemaining.set(id, new Set());
+    if (playerIds.length < 2) {
+      throw new BadRequestException('Potrebna su najmanje 2 igrača za generisanje rasporeda');
     }
 
-    for (let i = 0; i < playerIds.length; i++) {
-      for (let j = i + 1; j < playerIds.length; j++) {
-        const a = playerIds[i];
-        const b = playerIds[j];
-        remainingSet.add(`${a}|||${b}`);
-        playerRemaining.get(a)!.add(b);
-        playerRemaining.get(b)!.add(a);
-      }
+    // Circuit 1: single round-robin — every pair plays once
+    const firstCircuit = this.buildRoundRobinRounds(playerIds);
+
+    const allRounds: [string, string][][] = [...firstCircuit];
+
+    if (homeAway) {
+      // Circuit 2: same round groupings, home/away flipped (§3 — двокружни систем)
+      // Player who was home in circuit 1 becomes away in circuit 2, and vice versa.
+      const secondCircuit = firstCircuit.map((round) =>
+        round.map(([home, away]): [string, string] => [away, home]),
+      );
+      allRounds.push(...secondCircuit);
     }
 
-    const groups: { players: string[]; matches: [string, string][] }[] = [];
-
-    // ─── Phase 1: main evenings — strict round-robin within one group ─────────
-    // One group per evening; all players in the group play each other (remaining pairs only).
-    // Exits early when the greedy can no longer form a group of ≥ 3 players,
-    // handing the scattered tail over to the clearing phase.
-    while (remainingSet.size > 0) {
-      // Seed = player with most remaining pairs
-      let seedPlayer = '';
-      let maxRemaining = -1;
-      for (const p of playerIds) {
-        const cnt = playerRemaining.get(p)?.size ?? 0;
-        if (cnt > maxRemaining) { maxRemaining = cnt; seedPlayer = p; }
-      }
-      if (!seedPlayer || maxRemaining === 0) break;
-
-      const group: string[] = [seedPlayer];
-
-      // Greedily add players that maximise unplayed pairs with current group members
-      while (group.length < groupSize) {
-        let bestCandidate = '';
-        let bestScore = -1;
-        for (const p of playerIds) {
-          if (group.includes(p)) continue;
-          let score = 0;
-          for (const gp of group) {
-            if (remainingSet.has(`${p}|||${gp}`) || remainingSet.has(`${gp}|||${p}`)) score++;
-          }
-          if (score > bestScore) { bestScore = score; bestCandidate = p; }
-        }
-        if (!bestCandidate || bestScore === 0) break;
-        group.push(bestCandidate);
-      }
-
-      // Group too small for a meaningful main evening → hand off to clearing phase
-      if (group.length < 3) break;
-
-      // Commit: schedule and remove all remaining pairs within the group
-      const groupMatches: [string, string][] = [];
-      for (let i = 0; i < group.length; i++) {
-        for (let j = i + 1; j < group.length; j++) {
-          const a = group[i]; const b = group[j];
-          const key1 = `${a}|||${b}`; const key2 = `${b}|||${a}`;
-          if (remainingSet.has(key1)) {
-            groupMatches.push([a, b]);
-            remainingSet.delete(key1);
-            playerRemaining.get(a)?.delete(b);
-            playerRemaining.get(b)?.delete(a);
-          } else if (remainingSet.has(key2)) {
-            groupMatches.push([b, a]);
-            remainingSet.delete(key2);
-            playerRemaining.get(a)?.delete(b);
-            playerRemaining.get(b)?.delete(a);
-          }
-        }
-      }
-
-      if (groupMatches.length > 0) groups.push({ players: group, matches: groupMatches });
-    }
-
-    // ─── Phase 2: clearing evenings — consolidate scattered tail pairs ────────
-    // Remaining pairs can no longer form full round-robin groups.
-    // Each clearing evening: seed player + all their remaining opponents form a group,
-    // and every unplayed pair within that group gets scheduled on the same evening.
-    // This collapses what would be 4–6 one-match evenings into 1–2 denser evenings.
-    const maxClearingSize = groupSize + 2;
-
-    while (remainingSet.size > 0) {
-      let seedPlayer = '';
-      let maxRemaining = -1;
-      for (const p of playerIds) {
-        const cnt = playerRemaining.get(p)?.size ?? 0;
-        if (cnt > maxRemaining) { maxRemaining = cnt; seedPlayer = p; }
-      }
-      if (!seedPlayer || maxRemaining === 0) break;
-
-      // Clearing group: seed + remaining opponents (capped to avoid oversized evenings)
-      const opponents = Array.from(playerRemaining.get(seedPlayer)!);
-      const clearingGroup = [seedPlayer, ...opponents].slice(0, maxClearingSize);
-
-      // Schedule ALL remaining pairs within the clearing group
-      const clearingMatches: [string, string][] = [];
-      for (let i = 0; i < clearingGroup.length; i++) {
-        for (let j = i + 1; j < clearingGroup.length; j++) {
-          const a = clearingGroup[i]; const b = clearingGroup[j];
-          const key1 = `${a}|||${b}`; const key2 = `${b}|||${a}`;
-          if (remainingSet.has(key1)) {
-            clearingMatches.push([a, b]);
-            remainingSet.delete(key1);
-            playerRemaining.get(a)?.delete(b);
-            playerRemaining.get(b)?.delete(a);
-          } else if (remainingSet.has(key2)) {
-            clearingMatches.push([b, a]);
-            remainingSet.delete(key2);
-            playerRemaining.get(a)?.delete(b);
-            playerRemaining.get(b)?.delete(a);
-          }
-        }
-      }
-
-      if (clearingMatches.length > 0) groups.push({ players: clearingGroup, matches: clearingMatches });
-    }
-
-    // ─── Persist ─────────────────────────────────────────────────────────────
+    // Persist — one DB row per match, ordered by round then match position
     const allMatches: LeagueMatch[] = [];
     let order = 0;
-    for (let e = 0; e < groups.length; e++) {
-      const eveningNum = e + 1;
-      for (const [home, away] of groups[e].matches) {
+
+    for (let r = 0; r < allRounds.length; r++) {
+      const roundNum = r + 1;
+      for (const [home, away] of allRounds[r]) {
         allMatches.push(
           this.leagueMatchRepo.create({
             leagueId,
             homePlayerId: home,
             awayPlayerId: away,
-            roundNumber: eveningNum,
-            sessionNumber: eveningNum,
+            // Round mode: assign round numbers upfront for fixed schedule
+            // Session mode: leave at 0 — assigned dynamically per evening
+            roundNumber: mode === 'session' ? 0 : roundNum,
+            sessionNumber: mode === 'session' ? 0 : roundNum,
             matchOrder: order++,
           }),
         );

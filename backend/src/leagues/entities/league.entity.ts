@@ -42,7 +42,7 @@ export class League {
   @Column({ name: 'sets_per_match', default: 1 })
   setsPerMatch: number;
 
-  @Column({ name: 'legs_per_set', default: 3 })
+  @Column({ name: 'legs_per_set', default: 4 })
   legsPerSet: number;
 
   @Column({ name: 'starting_score', default: 501 })
@@ -50,6 +50,10 @@ export class League {
 
   @Column({ type: 'enum', enum: LeagueStatus, default: LeagueStatus.DRAFT })
   status: LeagueStatus;
+
+  /** 'round' = full schedule upfront with rounds/substitutions; 'session' = flexible evening-based play */
+  @Column({ default: 'round' })
+  mode: string;
 
   @OneToMany(() => LeaguePlayer, (lp) => lp.league)
   leaguePlayers: LeaguePlayer[];

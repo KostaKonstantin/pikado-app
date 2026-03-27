@@ -45,4 +45,48 @@ export const leaguesApi = {
 
   applySubstitutions: (clubId: string, leagueId: string, eveningNum: number, substitutions: { absentId: string; substituteId: string }[]) =>
     api.post(`/clubs/${clubId}/leagues/${leagueId}/evenings/${eveningNum}/apply-substitutions`, { substitutions }).then((r) => r.data),
+
+  // §8: неоправдан недолазак — walkoverId is the ABSENT player who forfeits
+  recordWalkover: (clubId: string, leagueId: string, matchId: string, walkoverId: string) =>
+    api.post(`/clubs/${clubId}/leagues/${leagueId}/matches/${matchId}/walkover`, { walkoverId }).then((r) => r.data),
+
+  // Dynamic schedule stats — all values derived from N players + format, never hardcoded
+  getStats: (clubId: string, leagueId: string) =>
+    api.get(`/clubs/${clubId}/leagues/${leagueId}/stats`).then((r) => r.data),
+
+  getSubstitutions: (clubId: string, leagueId: string) =>
+    api.get(`/clubs/${clubId}/leagues/${leagueId}/substitutions`).then((r) => r.data),
+
+  // ─── Sessions ─────────────────────────────────────────────────────────────
+
+  getSessions: (clubId: string, leagueId: string) =>
+    api.get(`/clubs/${clubId}/leagues/${leagueId}/sessions`).then((r) => r.data),
+
+  getSession: (clubId: string, leagueId: string, sessionId: string) =>
+    api.get(`/clubs/${clubId}/leagues/${leagueId}/sessions/${sessionId}`).then((r) => r.data),
+
+  getPoolInfo: (clubId: string, leagueId: string) =>
+    api.get(`/clubs/${clubId}/leagues/${leagueId}/sessions/pool`).then((r) => r.data),
+
+  previewSession: (clubId: string, leagueId: string, data: { presentPlayerIds: string[]; maxMatchesPerPlayer?: number }) =>
+    api.post(`/clubs/${clubId}/leagues/${leagueId}/sessions/preview`, data).then((r) => r.data),
+
+  createSession: (clubId: string, leagueId: string, data: { presentPlayerIds: string[]; maxMatchesPerPlayer?: number; sessionDate?: string | null }) =>
+    api.post(`/clubs/${clubId}/leagues/${leagueId}/sessions`, data).then((r) => r.data),
+
+  closeSession: (clubId: string, leagueId: string, sessionId: string) =>
+    api.patch(`/clubs/${clubId}/leagues/${leagueId}/sessions/${sessionId}/close`, {}).then((r) => r.data),
+
+  deleteSession: (clubId: string, leagueId: string, sessionId: string) =>
+    api.delete(`/clubs/${clubId}/leagues/${leagueId}/sessions/${sessionId}`).then((r) => r.data),
+
+  checkManualMatch: (clubId: string, leagueId: string, sessionId: string, homePlayerId: string, awayPlayerId: string) =>
+    api.get(`/clubs/${clubId}/leagues/${leagueId}/sessions/${sessionId}/match-check`, {
+      params: { homePlayerId, awayPlayerId },
+    }).then((r) => r.data),
+
+  addManualMatch: (clubId: string, leagueId: string, sessionId: string, homePlayerId: string, awayPlayerId: string) =>
+    api.post(`/clubs/${clubId}/leagues/${leagueId}/sessions/${sessionId}/matches`, {
+      homePlayerId, awayPlayerId,
+    }).then((r) => r.data),
 };

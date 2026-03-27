@@ -23,6 +23,7 @@ export enum MatchStatus {
   IN_PROGRESS = 'in_progress',
   COMPLETED = 'completed',
   BYE = 'bye',
+  WALKOVER = 'walkover',
 }
 
 export enum LeagueStatus {

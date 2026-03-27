@@ -4,8 +4,15 @@ import { Repository } from 'typeorm';
 import { League } from './entities/league.entity';
 import { LeaguePlayer } from './entities/league-player.entity';
 import { LeagueMatch } from './entities/league-match.entity';
-import { FixtureService } from './fixture.service';
+import { LeagueSubstitution } from './entities/league-substitution.entity';
+import { LeagueSession } from './entities/league-session.entity';
+import { FixtureService, rrStats } from './fixture.service';
 import { MatchStatus, LeagueStatus, LeagueFormat } from '../common/enums';
+
+// Helper: sort-key for a canonical player pair (order-independent)
+function pairKey(a: string, b: string): string {
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
 
 function slugify(text: string): string {
   return text
@@ -21,6 +28,8 @@ export class LeaguesService {
     @InjectRepository(League) private leagueRepo: Repository<League>,
     @InjectRepository(LeaguePlayer) private lpRepo: Repository<LeaguePlayer>,
     @InjectRepository(LeagueMatch) private lmRepo: Repository<LeagueMatch>,
+    @InjectRepository(LeagueSubstitution) private subRepo: Repository<LeagueSubstitution>,
+    @InjectRepository(LeagueSession) private sessionRepo: Repository<LeagueSession>,
     private fixtureService: FixtureService,
   ) {}
 
@@ -58,7 +67,9 @@ export class LeaguesService {
 
   async remove(clubId: string, id: string) {
     await this.findOne(clubId, id);
+    await this.subRepo.delete({ leagueId: id });
     await this.lmRepo.delete({ leagueId: id });
+    await this.sessionRepo.delete({ leagueId: id });
     await this.lpRepo.delete({ leagueId: id });
     await this.leagueRepo.delete({ id, clubId });
   }
@@ -90,17 +101,53 @@ export class LeaguesService {
     // Clear any previously generated fixtures before regenerating
     await this.lmRepo.delete({ leagueId });
 
-    const matches = await this.fixtureService.generateFixtures(leagueId, playerIds, false);
+    const matches = await this.fixtureService.generateFixtures(
+      leagueId,
+      playerIds,
+      league.format === LeagueFormat.HOME_AWAY,
+      league.mode ?? 'round',
+    );
 
     await this.leagueRepo.update({ id: leagueId }, { status: LeagueStatus.ACTIVE });
     return { matchCount: matches.length };
+  }
+
+  // ─── Schedule stats ─────────────────────────────────────────────────────────
+  // Returns all schedule metrics derived purely from player count and format.
+  // Zero hardcoded values — formulas documented in fixture.service.ts.
+  // ───────────────────────────────────────────────────────────────────────────
+  async getScheduleStats(clubId: string, leagueId: string) {
+    const league = await this.findOne(clubId, leagueId);
+    const players = await this.lpRepo.find({ where: { leagueId } });
+    const n = players.length;
+    const homeAway = league.format === LeagueFormat.HOME_AWAY;
+
+    const { rounds, matchesPerRound, totalMatches, hasOddPlayers } = rrStats(n, homeAway);
+
+    const generatedCount = await this.lmRepo.count({ where: { leagueId } });
+    const completedCount = await this.lmRepo.count({ where: { leagueId, status: MatchStatus.COMPLETED } });
+
+    return {
+      playerCount: n,
+      isDoubleRoundRobin: homeAway,
+      hasOddPlayers,
+      // Expected totals (from formula, not from DB)
+      expectedRounds: rounds,
+      matchesPerRound,
+      expectedTotalMatches: totalMatches,
+      // Actual DB state
+      generatedMatches: generatedCount,
+      completedMatches: completedCount,
+      isGenerated: generatedCount > 0,
+      progressPct: totalMatches > 0 ? Math.round((completedCount / totalMatches) * 100) : 0,
+    };
   }
 
   async getFixtures(clubId: string, leagueId: string) {
     await this.findOne(clubId, leagueId);
     return this.lmRepo.find({
       where: { leagueId },
-      relations: ['homePlayer', 'awayPlayer'],
+      relations: ['homePlayer', 'awayPlayer', 'homeSubstituteFor', 'awaySubstituteFor'],
       order: { matchOrder: 'ASC' },
     });
   }
@@ -121,16 +168,19 @@ export class LeaguesService {
       throw new BadRequestException('Rezultat ne može biti negativan');
     }
     if (homeSets > max || awaySets > max) {
-      throw new BadRequestException(`Maksimalan broj setova/legova je ${max}`);
+      throw new BadRequestException(`Maksimalan broj legova/setova je ${max}`);
     }
     if (homeSets === 0 && awaySets === 0) {
       throw new BadRequestException('Rezultat ne može biti 0:0');
     }
-    const isDecisive = Math.max(homeSets, awaySets) === max;
+    // §4: draw at (max-1):(max-1), so max:(max-1) is unreachable (match ends at the draw)
+    const minScore = Math.min(homeSets, awaySets);
+    const maxScore = Math.max(homeSets, awaySets);
+    const isDecisive = maxScore === max && minScore < max - 1;
     const isDraw = homeSets === awaySets && homeSets === max - 1;
     if (!isDecisive && !isDraw) {
       throw new BadRequestException(
-        `Validan rezultat: pobeda (${max}:0 – ${max}:${max - 1}) ili remi (${max - 1}:${max - 1})`,
+        `Validan rezultat: pobeda (${max}:0 do ${max}:${max - 2}) ili remi (${max - 1}:${max - 1})`,
       );
     }
 
@@ -183,14 +233,31 @@ export class LeaguesService {
     }
   }
 
-  // Builds a map: sortedPairKey → match record (for all matches in the league)
-  private buildMatchMap(matches: LeagueMatch[]): Map<string, LeagueMatch> {
-    const map = new Map<string, LeagueMatch>();
+  // Total count of matches per sorted pair (all statuses — determines scheduling slots used)
+  private buildPairTotalCountMap(matches: LeagueMatch[]): Map<string, number> {
+    const map = new Map<string, number>();
     for (const m of matches) {
-      const key = [m.homePlayerId, m.awayPlayerId].sort().join('|||');
-      map.set(key, m);
+      const key = pairKey(m.homePlayerId, m.awayPlayerId);
+      map.set(key, (map.get(key) ?? 0) + 1);
     }
     return map;
+  }
+
+  // Find a pending (non-postponed) match for a pair that is NOT in the current evening
+  private findMovablePendingMatch(
+    matches: LeagueMatch[],
+    id1: string,
+    id2: string,
+    excludeEvening: number,
+  ): LeagueMatch | undefined {
+    return matches.find(
+      (m) =>
+        m.status === MatchStatus.PENDING &&
+        !m.isPostponed &&
+        m.sessionNumber !== excludeEvening &&
+        ((m.homePlayerId === id1 && m.awayPlayerId === id2) ||
+          (m.homePlayerId === id2 && m.awayPlayerId === id1)),
+    );
   }
 
   async previewSubstitutions(
@@ -199,9 +266,12 @@ export class LeaguesService {
     eveningNumber: number,
     substitutions: { absentId: string; substituteId: string }[],
   ) {
-    await this.findOne(clubId, leagueId);
+    const league = await this.findOne(clubId, leagueId);
+    const maxAllowed = league.format === LeagueFormat.HOME_AWAY ? 2 : 1;
 
-    if (substitutions.length === 0) return { willPostpone: [], willCreate: [], willMove: [], willSkip: [], warnings: [] };
+    if (substitutions.length === 0) {
+      return { willPostpone: [], willCreate: [], willMove: [], willSkip: [], warnings: [], canApply: false };
+    }
 
     const eveningPending = await this.lmRepo.find({
       where: { leagueId, sessionNumber: eveningNumber, status: MatchStatus.PENDING, isPostponed: false },
@@ -213,10 +283,13 @@ export class LeaguesService {
     const absentSet = new Set(substitutions.map((s) => s.absentId));
 
     const allMatches = await this.lmRepo.find({ where: { leagueId } });
-    const matchMap = this.buildMatchMap(allMatches);
+    const pairCounts = this.buildPairTotalCountMap(allMatches);
 
     const willPostpone: { homePlayerId: string; awayPlayerId: string }[] = [];
-    const willCreate: { homePlayerId: string; awayPlayerId: string }[] = [];
+    const willCreate: {
+      homePlayerId: string; awayPlayerId: string;
+      valid: boolean; existingCount: number; maxAllowed: number; reason?: string;
+    }[] = [];
     const willMove: { homePlayerId: string; awayPlayerId: string; fromEvening: number }[] = [];
     const willSkip: { homePlayerId: string; awayPlayerId: string; reason: string }[] = [];
     const handled = new Set<string>();
@@ -232,18 +305,25 @@ export class LeaguesService {
       const newAwayId = awayIsAbsent ? substituteMap.get(match.awayPlayerId)! : match.awayPlayerId;
       if (newHomeId === newAwayId) continue;
 
-      const key = [newHomeId, newAwayId].sort().join('|||');
+      const key = pairKey(newHomeId, newAwayId);
       if (handled.has(key)) continue;
       handled.add(key);
 
-      const existing = matchMap.get(key);
-      if (!existing) {
-        willCreate.push({ homePlayerId: newHomeId, awayPlayerId: newAwayId });
-      } else if (existing.status === MatchStatus.COMPLETED) {
-        willSkip.push({ homePlayerId: newHomeId, awayPlayerId: newAwayId, reason: `već odigrano ${existing.homeSets}:${existing.awaySets}` });
+      const totalCount = pairCounts.get(key) ?? 0;
+      const movable = this.findMovablePendingMatch(allMatches, newHomeId, newAwayId, eveningNumber);
+
+      if (movable) {
+        // A pending match for this pair already exists elsewhere — just reschedule it (count unchanged)
+        willMove.push({ homePlayerId: movable.homePlayerId, awayPlayerId: movable.awayPlayerId, fromEvening: movable.sessionNumber });
+      } else if (totalCount < maxAllowed) {
+        willCreate.push({ homePlayerId: newHomeId, awayPlayerId: newAwayId, valid: true, existingCount: totalCount, maxAllowed });
       } else {
-        // PENDING in another evening (or postponed) → move to this evening
-        willMove.push({ homePlayerId: newHomeId, awayPlayerId: newAwayId, fromEvening: existing.sessionNumber });
+        // Pair already exhausted their allowed matches
+        willSkip.push({
+          homePlayerId: newHomeId,
+          awayPlayerId: newAwayId,
+          reason: `par već ${totalCount}/${maxAllowed} puta`,
+        });
       }
     }
 
@@ -257,7 +337,12 @@ export class LeaguesService {
       }
     }
 
-    return { willPostpone, willCreate, willMove, willSkip, warnings };
+    // canApply: no invalid creates; at least one action will occur
+    const canApply =
+      willCreate.every((m) => m.valid) &&
+      (willCreate.length > 0 || willMove.length > 0);
+
+    return { willPostpone, willCreate, willMove, willSkip, warnings, canApply };
   }
 
   async applySubstitutions(
@@ -266,7 +351,8 @@ export class LeaguesService {
     eveningNumber: number,
     substitutions: { absentId: string; substituteId: string }[],
   ) {
-    await this.findOne(clubId, leagueId);
+    const league = await this.findOne(clubId, leagueId);
+    const maxAllowed = league.format === LeagueFormat.HOME_AWAY ? 2 : 1;
 
     const eveningPending = await this.lmRepo.find({
       where: { leagueId, sessionNumber: eveningNumber, status: MatchStatus.PENDING, isPostponed: false },
@@ -278,7 +364,7 @@ export class LeaguesService {
     const absentSet = new Set(substitutions.map((s) => s.absentId));
 
     const allMatches = await this.lmRepo.find({ where: { leagueId } });
-    const matchMap = this.buildMatchMap(allMatches);
+    const pairCounts = this.buildPairTotalCountMap(allMatches);
 
     const maxOrderResult = await this.lmRepo
       .createQueryBuilder('lm')
@@ -298,7 +384,7 @@ export class LeaguesService {
       const awayIsAbsent = absentSet.has(match.awayPlayerId);
       if (!homeIsAbsent && !awayIsAbsent) continue;
 
-      // Postpone X's original match — X still owes this game
+      // Postpone the original match — the absent player still owes this game
       await this.lmRepo.update(match.id, { isPostponed: true });
       postponed++;
 
@@ -306,18 +392,31 @@ export class LeaguesService {
       const newAwayId = awayIsAbsent ? substituteMap.get(match.awayPlayerId)! : match.awayPlayerId;
       if (newHomeId === newAwayId) continue;
 
-      const key = [newHomeId, newAwayId].sort().join('|||');
+      const key = pairKey(newHomeId, newAwayId);
       if (handled.has(key)) continue;
       handled.add(key);
 
-      const existing = matchMap.get(key);
+      const totalCount = pairCounts.get(key) ?? 0;
+      const movable = this.findMovablePendingMatch(allMatches, newHomeId, newAwayId, eveningNumber);
 
-      if (!existing) {
-        // No match exists — create fresh
+      if (movable) {
+        // Reschedule the existing pending match to this evening
+        await this.lmRepo.update(movable.id, {
+          sessionNumber: eveningNumber,
+          roundNumber: eveningNumber,
+          matchOrder: nextOrder++,
+          isPostponed: false,
+        });
+        moved++;
+      } else if (totalCount < maxAllowed) {
+        // Create a new substitution match with markers
         const newMatch = this.lmRepo.create({
           leagueId,
           homePlayerId: newHomeId,
           awayPlayerId: newAwayId,
+          homeSubstituteForId: homeIsAbsent ? match.homePlayerId : null,
+          awaySubstituteForId: awayIsAbsent ? match.awayPlayerId : null,
+          isSubstitutionMatch: true,
           roundNumber: eveningNumber,
           sessionNumber: eveningNumber,
           matchOrder: nextOrder++,
@@ -325,23 +424,35 @@ export class LeaguesService {
           isPostponed: false,
         });
         await this.lmRepo.save(newMatch);
+        pairCounts.set(key, totalCount + 1);
         created++;
-      } else if (existing.status === MatchStatus.COMPLETED) {
-        // Already played — nothing to do
-        skipped++;
       } else {
-        // PENDING match in another evening → move it here
-        await this.lmRepo.update(existing.id, {
-          sessionNumber: eveningNumber,
-          roundNumber: eveningNumber,
-          matchOrder: nextOrder++,
-          isPostponed: false,
-        });
-        moved++;
+        skipped++;
       }
     }
 
+    // Record substitution history (for UI display only — does NOT touch future matches)
+    for (const sub of substitutions) {
+      await this.subRepo.save(
+        this.subRepo.create({
+          leagueId,
+          absentPlayerId: sub.absentId,
+          substitutePlayerId: sub.substituteId,
+          appliedFromEvening: eveningNumber,
+        }),
+      );
+    }
+
     return { postponed, created, moved, skipped };
+  }
+
+  async getSubstitutions(clubId: string, leagueId: string) {
+    await this.findOne(clubId, leagueId);
+    return this.subRepo.find({
+      where: { leagueId },
+      relations: ['absentPlayer', 'substitutePlayer'],
+      order: { appliedFromEvening: 'ASC', createdAt: 'ASC' },
+    });
   }
 
   async postponeMatch(
@@ -405,6 +516,9 @@ export class LeaguesService {
       });
     }
 
+    // §6 tiebreaker 4: head-to-head points map — "A vs B" key → A's H2H points against B
+    const h2hPoints = new Map<string, number>();
+
     for (const m of matches) {
       const home = statsMap.get(m.homePlayerId);
       const away = statsMap.get(m.awayPlayerId);
@@ -417,31 +531,92 @@ export class LeaguesService {
       away.setsFor += m.awaySets;
       away.setsAgainst += m.homeSets;
 
+      // Directional H2H keys: "homeId→awayId" and "awayId→homeId"
+      const hKey = `${m.homePlayerId}→${m.awayPlayerId}`;
+      const aKey = `${m.awayPlayerId}→${m.homePlayerId}`;
+
       if (m.winnerId === m.homePlayerId) {
         home.won++;
         home.points += league.pointsWin;
         away.lost++;
         away.points += league.pointsLoss;
+        h2hPoints.set(hKey, (h2hPoints.get(hKey) ?? 0) + league.pointsWin);
+        h2hPoints.set(aKey, (h2hPoints.get(aKey) ?? 0) + league.pointsLoss);
       } else if (m.winnerId === m.awayPlayerId) {
         away.won++;
         away.points += league.pointsWin;
         home.lost++;
         home.points += league.pointsLoss;
+        h2hPoints.set(hKey, (h2hPoints.get(hKey) ?? 0) + league.pointsLoss);
+        h2hPoints.set(aKey, (h2hPoints.get(aKey) ?? 0) + league.pointsWin);
       } else {
         home.drawn++;
         away.drawn++;
         home.points += league.pointsDraw;
         away.points += league.pointsDraw;
+        h2hPoints.set(hKey, (h2hPoints.get(hKey) ?? 0) + league.pointsDraw);
+        h2hPoints.set(aKey, (h2hPoints.get(aKey) ?? 0) + league.pointsDraw);
       }
     }
 
+    const getH2H = (aId: string, bId: string) => h2hPoints.get(`${aId}→${bId}`) ?? 0;
+
     return Array.from(statsMap.values())
       .sort((a, b) => {
+        // §6 criterion 1: points
         if (b.points !== a.points) return b.points - a.points;
-        const aSetDiff = a.setsFor - a.setsAgainst;
-        const bSetDiff = b.setsFor - b.setsAgainst;
-        return bSetDiff - aSetDiff;
+        // §6 criterion 2: leg difference (sets are legs when setsPerMatch=1)
+        const aLegDiff = a.setsFor - a.setsAgainst;
+        const bLegDiff = b.setsFor - b.setsAgainst;
+        if (bLegDiff !== aLegDiff) return bLegDiff - aLegDiff;
+        // §6 criterion 3: more legs won
+        if (b.setsFor !== a.setsFor) return b.setsFor - a.setsFor;
+        // §6 criterion 4: head-to-head score
+        const aH2H = getH2H(a.player?.id, b.player?.id);
+        const bH2H = getH2H(b.player?.id, a.player?.id);
+        if (bH2H !== aH2H) return bH2H - aH2H;
+        // §6 criterion 5: additional match — manual, not resolvable in code
+        return 0;
       })
       .map((s, i) => ({ position: i + 1, ...s, postponed: postponedCount.get(s.player?.id) ?? 0 }));
+  }
+
+  /**
+   * §8 — Records a walkover: the absent player forfeits 4:0.
+   * walkoverId = the player who was absent (the LOSER).
+   */
+  async recordWalkover(
+    clubId: string,
+    leagueId: string,
+    matchId: string,
+    walkoverId: string,
+  ) {
+    const league = await this.findOne(clubId, leagueId);
+    const match = await this.lmRepo.findOne({ where: { id: matchId, leagueId } });
+    if (!match) throw new NotFoundException('Meč nije pronađen');
+    if (match.status === MatchStatus.COMPLETED || match.status === MatchStatus.WALKOVER) {
+      throw new BadRequestException('Meč je već završen');
+    }
+    if (walkoverId !== match.homePlayerId && walkoverId !== match.awayPlayerId) {
+      throw new BadRequestException('Igrač nije učesnik ovog meča');
+    }
+
+    const legsToWin = league.setsPerMatch === 1 ? league.legsPerSet : league.setsPerMatch;
+    const homeIsAbsent = walkoverId === match.homePlayerId;
+    const homeSets = homeIsAbsent ? 0 : legsToWin;
+    const awaySets = homeIsAbsent ? legsToWin : 0;
+    const winnerId = homeIsAbsent ? match.awayPlayerId : match.homePlayerId;
+
+    await this.lmRepo.update(matchId, {
+      homeSets,
+      awaySets,
+      winnerId,
+      status: MatchStatus.COMPLETED,
+      isWalkover: true,
+      playedAt: new Date(),
+      isPostponed: false,
+    });
+
+    return this.lmRepo.findOne({ where: { id: matchId }, relations: ['homePlayer', 'awayPlayer'] });
   }
 }
