@@ -6,117 +6,174 @@ import { leaguesApi } from '@/lib/api/leagues.api';
 import { playersApi } from '@/lib/api/players.api';
 import { rankingsApi } from '@/lib/api/rankings.api';
 import { Topbar } from '@/components/layout/topbar';
-import { Trophy, Users, Swords, BarChart3, ArrowRight, Target } from 'lucide-react';
+import { Trophy, Users, Swords, BarChart3, ArrowRight, Plus, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
 
+function SkeletonStatCard() {
+  return (
+    <div className="stat-card p-6">
+      <div className="skeleton h-3 w-20 mb-4 rounded" />
+      <div className="skeleton h-8 w-14 mb-2 rounded" />
+      <div className="skeleton h-3 w-24 rounded" />
+    </div>
+  );
+}
+
+function StatCard({
+  label, value, icon: Icon, color, bg, href, loading, delay = 0,
+}: {
+  label: string; value: number; icon: any; color: string; bg: string;
+  href: string; loading: boolean; delay?: number;
+}) {
+  return (
+    <Link
+      href={href}
+      className="stat-card p-6 block group animate-fade-in-up"
+      style={{ animationDelay: `${delay}ms` }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-wide mb-2" style={{ color: 'var(--text-secondary)' }}>{label}</p>
+          {loading ? (
+            <div className="skeleton h-9 w-14 rounded" />
+          ) : (
+            <p className="text-4xl font-bold leading-none animate-count-up" style={{ color: 'var(--text-primary)' }}>
+              {value}
+            </p>
+          )}
+        </div>
+        <div className={`w-12 h-12 rounded-2xl ${bg} flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-110`}>
+          <Icon className={`w-5 h-5 ${color}`} />
+        </div>
+      </div>
+      <div className="flex items-center gap-1 mt-4">
+        <span className="text-xs font-medium text-orange-400 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+          Prikaži sve <ArrowRight className="w-3 h-3" />
+        </span>
+      </div>
+    </Link>
+  );
+}
+
 export default function DashboardPage() {
-  const { club } = useAuthStore();
-  const [stats, setStats] = useState({ tournaments: 0, leagues: 0, players: 0 });
-  const [recentTournaments, setRecentTournaments] = useState<any[]>([]);
-  const [topPlayers, setTopPlayers] = useState<any[]>([]);
+  const { club, user } = useAuthStore();
+  const [stats, setStats] = useState({ leagues: 0, players: 0 });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!club?.id) return;
     Promise.all([
-      tournamentsApi.getAll(club.id),
       leaguesApi.getAll(club.id),
       playersApi.getAll(club.id),
-      rankingsApi.get(club.id),
-    ]).then(([tournaments, leagues, players, rankings]) => {
-      setStats({
-        tournaments: tournaments.length || 0,
-        leagues: leagues.length || 0,
-        players: players.length || 0,
-      });
-      setRecentTournaments((tournaments || []).slice(0, 3));
-      setTopPlayers((rankings || []).slice(0, 5));
+    ]).then(([leagues, players]) => {
+      setStats({ leagues: leagues.length || 0, players: players.length || 0 });
     }).catch(console.error).finally(() => setLoading(false));
   }, [club?.id]);
 
-  const statusLabel: Record<string, string> = {
-    draft: 'Nacrt',
-    registration: 'Registracija',
-    in_progress: 'U toku',
-    completed: 'Završen',
-  };
-
-  const statusColor: Record<string, string> = {
-    draft: 'badge text-slate-400 bg-slate-800',
-    registration: 'badge badge-active',
-    in_progress: 'badge badge-win',
-    completed: 'badge text-slate-400 bg-slate-800',
-  };
+  const greeting = (() => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Dobro jutro';
+    if (h < 18) return 'Dobar dan';
+    return 'Dobro veče';
+  })();
 
   return (
-    <div>
+    <div className="min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
       <Topbar title="Pregled" />
-      <div className="p-6 space-y-6">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[
-            { label: 'Lige', value: stats.leagues, icon: Swords, color: 'text-blue-400', bg: 'bg-blue-500/10', href: '/leagues' },
-            { label: 'Igrači', value: stats.players, icon: Users, color: 'text-green-400', bg: 'bg-green-500/10', href: '/players' },
-          ].map((stat) => (
-            <Link key={stat.label} href={stat.href} className="card p-6 hover:border-slate-600 transition-colors">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-slate-400 text-sm">{stat.label}</p>
-                  <p className="text-3xl font-bold text-white mt-1">{loading ? '—' : stat.value}</p>
-                </div>
-                <div className={`w-12 h-12 rounded-xl ${stat.bg} flex items-center justify-center`}>
-                  <stat.icon className={`w-6 h-6 ${stat.color}`} />
-                </div>
-              </div>
-            </Link>
-          ))}
+
+      <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-6">
+
+        {/* Welcome banner */}
+        <div className="animate-fade-in-up">
+          <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+            {greeting}{user?.fullName ? `, ${user.fullName.split(' ')[0]}` : ''} 👋
+          </h2>
+          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
+            {club?.name} · Pregled aktivnosti kluba
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Coming soon: Tournaments */}
-          <div className="card p-6 opacity-50">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-white flex items-center gap-2">
-                <Trophy className="w-4 h-4 text-slate-500" /> Poslednji Turniri
-              </h3>
-              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide border border-slate-700 px-2 py-0.5 rounded-full">Uskoro</span>
-            </div>
-            <div className="text-center py-8">
-              <Trophy className="w-10 h-10 text-slate-700 mx-auto mb-2" />
-              <p className="text-slate-600 text-sm">Funkcionalnost u pripremi</p>
-            </div>
-          </div>
-
-          {/* Coming soon: Rankings */}
-          <div className="card p-6 opacity-50">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-white flex items-center gap-2">
-                <BarChart3 className="w-4 h-4 text-slate-500" /> Rang Lista
-              </h3>
-              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide border border-slate-700 px-2 py-0.5 rounded-full">Uskoro</span>
-            </div>
-            <div className="text-center py-8">
-              <BarChart3 className="w-10 h-10 text-slate-700 mx-auto mb-2" />
-              <p className="text-slate-600 text-sm">Funkcionalnost u pripremi</p>
-            </div>
-          </div>
+        {/* Stats grid */}
+        <div className="grid grid-cols-2 gap-3 md:gap-4">
+          {loading ? (
+            <>
+              <SkeletonStatCard />
+              <SkeletonStatCard />
+            </>
+          ) : (
+            <>
+              <StatCard label="Aktivne Lige" value={stats.leagues} icon={Swords} color="text-blue-400" bg="bg-blue-500/10" href="/leagues" loading={loading} delay={0} />
+              <StatCard label="Igrači" value={stats.players} icon={Users} color="text-emerald-400" bg="bg-emerald-500/10" href="/players" loading={loading} delay={80} />
+            </>
+          )}
         </div>
 
-        {/* Quick Actions */}
-        <div className="card p-6">
-          <h3 className="font-semibold text-white mb-4">Brze Akcije</h3>
+        {/* Quick actions */}
+        <div className="card p-5 animate-fade-in-up stagger-3">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-sm uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>
+              Brze Akcije
+            </h3>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             {[
-              { href: '/leagues/new', label: 'Kreiraj Ligu', icon: Swords },
-              { href: '/players/new', label: 'Dodaj Igrača', icon: Users },
-            ].map((action) => (
-              <Link key={action.href} href={action.href}
-                className="flex flex-col items-center gap-2 p-4 rounded-xl bg-slate-800 hover:bg-slate-700 transition-colors text-center">
-                <action.icon className="w-6 h-6 text-orange-400" />
-                <span className="text-sm text-slate-300 font-medium">{action.label}</span>
+              { href: '/leagues/new', label: 'Kreiraj Ligu', desc: 'Nova sezona', icon: Swords, color: 'text-blue-400', bg: 'bg-blue-500/10' },
+              { href: '/players/new', label: 'Dodaj Igrača', desc: 'Registracija', icon: Users, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+            ].map((action, i) => (
+              <Link
+                key={action.href}
+                href={action.href}
+                className="group flex items-center gap-3 p-4 rounded-xl border transition-all duration-200 hover:border-orange-500/40 hover:shadow-sm"
+                style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}
+              >
+                <div className={`w-9 h-9 rounded-xl ${action.bg} flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-110`}>
+                  <action.icon className={`w-4 h-4 ${action.color}`} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold leading-tight truncate" style={{ color: 'var(--text-primary)' }}>
+                    {action.label}
+                  </p>
+                  <p className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>
+                    {action.desc}
+                  </p>
+                </div>
+                <ArrowRight className="w-3.5 h-3.5 ml-auto shrink-0 opacity-0 group-hover:opacity-100 text-orange-400 transition-all -translate-x-1 group-hover:translate-x-0" />
               </Link>
             ))}
           </div>
+        </div>
+
+        {/* Coming soon cards */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 animate-fade-in-up stagger-4">
+          {[
+            { icon: Trophy, label: 'Turniri', desc: 'Bracket sistem, eliminacije, grupne faze' },
+            { icon: BarChart3, label: 'Rang Lista', desc: 'ELO rejtinzi, statistike, trendovi' },
+          ].map(({ icon: Icon, label, desc }) => (
+            <div
+              key={label}
+              className="card p-5 opacity-60 relative overflow-hidden"
+            >
+              {/* Subtle shimmer bg */}
+              <div className="absolute inset-0 opacity-[0.02] gradient-accent rounded-xl" />
+              <div className="relative flex items-start gap-4">
+                <div className="w-10 h-10 rounded-xl bg-slate-500/10 flex items-center justify-center shrink-0">
+                  <Icon className="w-5 h-5" style={{ color: 'var(--text-secondary)' }} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{label}</h3>
+                    <span
+                      className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full"
+                      style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                    >
+                      Uskoro
+                    </span>
+                  </div>
+                  <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{desc}</p>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
