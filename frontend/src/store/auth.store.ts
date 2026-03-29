@@ -2,16 +2,20 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-interface User {
+export interface User {
   id: string;
   email: string;
   fullName?: string;
+  avatarUrl?: string;
 }
 
-interface Club {
+export interface Club {
   id: string;
   name: string;
   slug: string;
+  city?: string;
+  country?: string;
+  logoUrl?: string;
 }
 
 interface AuthState {
@@ -23,6 +27,8 @@ interface AuthState {
   _hasHydrated: boolean;
   setAuth: (user: User, club: Club | null, token: string, role: string) => void;
   setClub: (club: Club) => void;
+  updateUser: (data: Partial<User>) => void;
+  updateClub: (data: Partial<Club>) => void;
   logout: () => void;
   setHasHydrated: (val: boolean) => void;
 }
@@ -42,6 +48,10 @@ export const useAuthStore = create<AuthState>()(
         set({ user, club, token, role, isAuthenticated: true });
       },
       setClub: (club) => set({ club }),
+      updateUser: (data) =>
+        set((state) => ({ user: state.user ? { ...state.user, ...data } : null })),
+      updateClub: (data) =>
+        set((state) => ({ club: state.club ? { ...state.club, ...data } : null })),
       logout: () => {
         if (typeof window !== 'undefined') localStorage.removeItem('token');
         set({ user: null, club: null, token: null, role: null, isAuthenticated: false });

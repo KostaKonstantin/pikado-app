@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
 import { ClubsModule } from './clubs/clubs.module';
 import { PlayersModule } from './players/players.module';
 import { SeasonsModule } from './seasons/seasons.module';
@@ -10,9 +11,11 @@ import { MatchesModule } from './matches/matches.module';
 import { LeaguesModule } from './leagues/leagues.module';
 import { RankingsModule } from './rankings/rankings.module';
 import { LiveModule } from './live/live.module';
+import { InvitesModule } from './invites/invites.module';
 
 // Entities
 import { User } from './users/entities/user.entity';
+import { Invite } from './invites/entities/invite.entity';
 import { Club } from './clubs/entities/club.entity';
 import { Membership } from './memberships/entities/membership.entity';
 import { Player } from './players/entities/player.entity';
@@ -37,12 +40,14 @@ import { Ranking } from './rankings/entities/ranking.entity';
         User, Club, Membership, Player, Season,
         Tournament, TournamentPlayer, Match,
         League, LeaguePlayer, LeagueMatch, LeagueSession, LeagueSubstitution, Ranking,
+        Invite,
       ],
       synchronize: true,
       logging: process.env.NODE_ENV === 'development',
       ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
     }),
     AuthModule,
+    UsersModule,
     ClubsModule,
     PlayersModule,
     SeasonsModule,
@@ -51,6 +56,7 @@ import { Ranking } from './rankings/entities/ranking.entity';
     LeaguesModule,
     RankingsModule,
     LiveModule,
+    InvitesModule,
   ],
 })
 export class AppModule {}

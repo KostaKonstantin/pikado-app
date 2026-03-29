@@ -35,7 +35,7 @@ export default function RootLayout({
         {/* Anti-flash script: sets theme class before first paint */}
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body className={`${inter.className} antialiased`}>
+      <body className={`${inter.className} antialiased`} suppressHydrationWarning>
         <Providers>
           {children}
         </Providers>

@@ -4,17 +4,87 @@ import Link from 'next/link';
 import { useAuthStore } from '@/store/auth.store';
 import { playersApi } from '@/lib/api/players.api';
 import { Topbar } from '@/components/layout/topbar';
-import { Users, Plus, Search, ChevronRight, Trash2 } from 'lucide-react';
+import {
+  Users, Plus, Search, Trash2, X, Loader2,
+  LayoutGrid, List, Check,
+} from 'lucide-react';
 
+/* ─── pixel avatar helpers ──────────────────────────────────────── */
+
+function avatarRarity(name: string): 'common' | 'rare' | 'epic' | 'legendary' {
+  const h = Array.from(name || '').reduce((acc, c) => ((acc * 31) + c.charCodeAt(0)) & 0xffff, 7) % 100;
+  if (h >= 97) return 'legendary';
+  if (h >= 85) return 'epic';
+  if (h >= 60) return 'rare';
+  return 'common';
+}
+
+const RARITY_RING: Record<string, string> = {
+  legendary: 'ring-2 ring-yellow-400/70 shadow-lg shadow-yellow-400/20',
+  epic:      'ring-2 ring-violet-500/60 shadow-md shadow-violet-500/15',
+  rare:      'ring-2 ring-blue-400/50',
+  common:    '',
+};
+const RARITY_DOT: Record<string, string> = {
+  legendary: 'bg-yellow-400',
+  epic:      'bg-violet-400',
+  rare:      'bg-blue-400',
+  common:    '',
+};
+
+function PlayerPixelAvatar({
+  name, size = 'md',
+}: { name: string; size?: 'sm' | 'md' | 'lg' }) {
+  const rarity = avatarRarity(name);
+  const src = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name || '?')}`;
+  const sz = size === 'lg' ? 'w-16 h-16' : size === 'md' ? 'w-12 h-12' : 'w-9 h-9';
+  const rounded = size === 'sm' ? 'rounded-full' : 'rounded-2xl';
+  return (
+    <div className={`relative ${sz} ${rounded} bg-slate-800 overflow-hidden shrink-0 ${RARITY_RING[rarity]}`}>
+      <img src={src} alt={name} className="w-full h-full object-cover scale-110" />
+      {rarity === 'legendary' && (
+        <div className="absolute inset-0 animate-shimmer pointer-events-none" />
+      )}
+      {RARITY_DOT[rarity] && (
+        <span className={`absolute bottom-0.5 right-0.5 w-2 h-2 rounded-full ${RARITY_DOT[rarity]} border border-slate-900`} />
+      )}
+    </div>
+  );
+}
+
+/* ─── skeleton cards ────────────────────────────────────────────── */
+function SkeletonCard() {
+  return (
+    <div className="card p-4 flex flex-col items-center gap-3 animate-pulse">
+      <div className="skeleton w-12 h-12 rounded-2xl" />
+      <div className="skeleton h-3.5 w-24 rounded" />
+      <div className="skeleton h-2.5 w-16 rounded" />
+    </div>
+  );
+}
+function SkeletonRow() {
+  return (
+    <div className="card px-4 py-3 flex items-center gap-3 animate-pulse">
+      <div className="skeleton w-9 h-9 rounded-full shrink-0" />
+      <div className="flex-1 space-y-1.5">
+        <div className="skeleton h-3.5 w-32 rounded" />
+        <div className="skeleton h-2.5 w-20 rounded" />
+      </div>
+    </div>
+  );
+}
+
+/* ─── main page ─────────────────────────────────────────────────── */
 export default function PlayersPage() {
   const { club } = useAuthStore();
-  const [players, setPlayers] = useState<any[]>([]);
-  const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [players,            setPlayers]            = useState<any[]>([]);
+  const [search,             setSearch]             = useState('');
+  const [loading,            setLoading]            = useState(true);
+  const [deletingId,         setDeletingId]         = useState<string | null>(null);
+  const [selectedIds,        setSelectedIds]        = useState<Set<string>>(new Set());
+  const [bulkDeleting,       setBulkDeleting]       = useState(false);
+  const [confirmBulkDelete,  setConfirmBulkDelete]  = useState(false);
+  const [viewMode,           setViewMode]           = useState<'grid' | 'list'>('grid');
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -24,42 +94,27 @@ export default function PlayersPage() {
     });
   };
 
-  const toggleSelectAll = () => {
-    if (selectedIds.size === players.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(players.map((p) => p.id)));
-    }
-  };
-
-  const handleDelete = async (id: string, name: string) => {
+  const handleDelete = async (id: string) => {
     if (!club?.id) return;
-    if (!confirm(`Obrisati igrača "${name}"? Ova akcija se ne može poništiti.`)) return;
     setDeletingId(id);
     try {
       await playersApi.remove(club.id, id);
       setPlayers((prev) => prev.filter((p) => p.id !== id));
       setSelectedIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
-    } catch {
-      alert('Greška pri brisanju igrača');
-    } finally {
-      setDeletingId(null);
-    }
+    } catch { /* silently fail */ }
+    finally { setDeletingId(null); }
   };
 
   const handleBulkDelete = async () => {
     if (!club?.id || selectedIds.size === 0) return;
-    if (!confirm(`Obrisati ${selectedIds.size} igrač(a)? Ova akcija se ne može poništiti.`)) return;
     setBulkDeleting(true);
     try {
-      await Promise.all([...selectedIds].map((id) => playersApi.remove(club.id, id)));
+      await Promise.all([...selectedIds].map((id) => playersApi.remove(club.id!, id)));
       setPlayers((prev) => prev.filter((p) => !selectedIds.has(p.id)));
       setSelectedIds(new Set());
-    } catch {
-      alert('Greška pri brisanju igrača');
-    } finally {
-      setBulkDeleting(false);
-    }
+      setConfirmBulkDelete(false);
+    } catch { /* silently fail */ }
+    finally { setBulkDeleting(false); }
   };
 
   useEffect(() => {
@@ -70,143 +125,287 @@ export default function PlayersPage() {
       .finally(() => setLoading(false));
   }, [club?.id, search]);
 
-  const allSelected = players.length > 0 && selectedIds.size === players.length;
-
+  /* ── render ─────────────────────────────────────────────────── */
   return (
-    <div>
+    <div className="min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
       <Topbar
         title="Igrači"
         actions={
           <Link href="/players/new" className="btn-primary text-sm">
-            <Plus className="w-4 h-4" /> Dodaj Igrača
+            <Plus className="w-4 h-4" /> Dodaj igrača
           </Link>
         }
       />
-      <div className="p-6">
-        {/* Search + bulk actions */}
-        <div className="flex items-center gap-3 mb-6">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+
+      <div className="p-4 md:p-6 max-w-6xl mx-auto space-y-4">
+
+        {/* ── controls bar ─────────────────────────────────────── */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* search */}
+          <div className="flex items-center gap-2 flex-1 min-w-0 input-field px-3 py-2 max-w-sm">
+            <Search className="w-3.5 h-3.5 text-slate-500 shrink-0" />
             <input
               type="text"
-              className="input-field pl-9!"
-              placeholder="Pretraži igrače..."
               value={search}
               onChange={(e) => { setSearch(e.target.value); setSelectedIds(new Set()); }}
+              placeholder="Pretraži igrače…"
+              className="flex-1 bg-transparent text-sm outline-none text-white placeholder-slate-500 min-w-0"
             />
+            {search && (
+              <button onClick={() => setSearch('')}>
+                <X className="w-3.5 h-3.5 text-slate-400 hover:text-white transition-colors" />
+              </button>
+            )}
           </div>
-          {selectedIds.size > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-slate-400">{selectedIds.size} izabrano</span>
+
+          {/* count badge */}
+          {!loading && (
+            <span className="text-xs text-slate-500 hidden sm:block">
+              {players.length} igrač{players.length !== 1 ? 'a' : ''}
+            </span>
+          )}
+
+          <div className="flex items-center gap-1 ml-auto">
+            {/* view toggle */}
+            <div className="flex items-center rounded-xl overflow-hidden border border-slate-700 shrink-0">
               <button
-                onClick={() => setSelectedIds(new Set())}
-                className="text-xs px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors"
+                onClick={() => setViewMode('grid')}
+                className={`p-2 transition-colors ${viewMode === 'grid' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+                title="Grid prikaz"
               >
-                Poništi
+                <LayoutGrid className="w-3.5 h-3.5" />
               </button>
               <button
-                onClick={handleBulkDelete}
-                disabled={bulkDeleting}
-                className="flex items-center gap-1.5 text-sm px-3 py-1.5 bg-red-500/15 text-red-400 hover:bg-red-500/25 rounded-lg transition-colors font-medium disabled:opacity-50"
+                onClick={() => setViewMode('list')}
+                className={`p-2 transition-colors ${viewMode === 'list' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+                title="Lista"
               >
-                {bulkDeleting
-                  ? <span className="animate-spin inline-block w-3.5 h-3.5 border-2 border-red-400/30 border-t-red-400 rounded-full" />
-                  : <Trash2 className="w-3.5 h-3.5" />
-                }
-                Obriši izabrane
+                <List className="w-3.5 h-3.5" />
               </button>
             </div>
-          )}
+          </div>
         </div>
 
+        {/* ── loading ──────────────────────────────────────────── */}
         {loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[1,2,3,4,5,6].map(i => <div key={i} className="card p-4 h-20 animate-pulse bg-slate-800" />)}
-          </div>
+          viewMode === 'grid' ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+              {Array.from({ length: 10 }).map((_, i) => <SkeletonCard key={i} />)}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} />)}
+            </div>
+          )
         ) : players.length === 0 ? (
-          <div className="text-center py-24">
-            <Users className="w-16 h-16 text-slate-600 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-white mb-2">
-              {search ? 'Nema rezultata' : 'Nema Igrača'}
+
+          /* ── empty state ───────────────────────────────────── */
+          <div className="empty-state animate-fade-in-up">
+            <div className="w-20 h-20 rounded-3xl bg-orange-500/10 flex items-center justify-center mb-5 border border-orange-500/20">
+              <Users className="w-9 h-9 text-orange-400/70" />
+            </div>
+            <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>
+              {search ? `Nema rezultata za "${search}"` : 'Nema igrača'}
             </h3>
-            {!search && (
+            {search ? (
+              <button onClick={() => setSearch('')} className="text-sm text-orange-400 hover:text-orange-300 transition-colors mt-1">
+                Poništi pretragu
+              </button>
+            ) : (
               <>
-                <p className="text-slate-400 mb-6">Dodajte prvog igrača u vaš klub</p>
+                <p className="text-sm mb-6" style={{ color: 'var(--text-secondary)' }}>
+                  Dodajte prvog igrača u vaš klub
+                </p>
                 <Link href="/players/new" className="btn-primary">
-                  <Plus className="w-4 h-4" /> Dodaj Igrača
+                  <Plus className="w-4 h-4" /> Dodaj prvog igrača
                 </Link>
               </>
             )}
           </div>
+
+        ) : viewMode === 'grid' ? (
+
+          /* ── GRID VIEW ─────────────────────────────────────── */
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+            {players.map((p, i) => {
+              const isSelected = selectedIds.has(p.id);
+              return (
+                <div
+                  key={p.id}
+                  style={{ animationDelay: `${i * 25}ms` }}
+                  className={`relative card p-4 flex flex-col items-center text-center gap-2.5 cursor-pointer select-none
+                    transition-all duration-150 group animate-fade-in-up
+                    ${isSelected
+                      ? 'ring-2 ring-orange-500 bg-orange-500/[0.06] shadow-lg shadow-orange-500/10'
+                      : 'hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/20 hover:bg-slate-800/60'}
+                  `}
+                  onClick={() => toggleSelect(p.id)}
+                >
+                  {/* checkbox corner */}
+                  <div className={`absolute top-2.5 left-2.5 w-4 h-4 rounded border-2 flex items-center justify-center transition-all duration-150
+                    ${isSelected ? 'bg-orange-500 border-orange-500' : 'border-slate-600 opacity-0 group-hover:opacity-100'}
+                  `}>
+                    {isSelected && <Check className="w-2.5 h-2.5 text-white" />}
+                  </div>
+
+                  {/* avatar */}
+                  <PlayerPixelAvatar name={p.fullName} size="md" />
+
+                  {/* name */}
+                  <div className="w-full min-w-0">
+                    <p className="text-sm font-semibold text-white leading-tight truncate">{p.fullName}</p>
+                    {p.nickname ? (
+                      <p className="text-xs text-slate-500 truncate mt-0.5">"{p.nickname}"</p>
+                    ) : p.country ? (
+                      <p className="text-xs text-slate-500 truncate mt-0.5">{p.country}</p>
+                    ) : null}
+                  </div>
+
+                  {/* detalji CTA */}
+                  <Link
+                    href={`/players/${p.id}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full text-xs text-slate-400 hover:text-orange-400 font-medium py-1.5 rounded-lg hover:bg-orange-500/10 transition-all"
+                  >
+                    Detalji →
+                  </Link>
+                </div>
+              );
+            })}
+          </div>
+
         ) : (
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-700">
-                  <th className="px-4 py-3 w-10">
-                    <div
-                      onClick={toggleSelectAll}
-                      className={`w-4 h-4 rounded border-2 cursor-pointer flex items-center justify-center transition-colors ${allSelected ? 'bg-red-500 border-red-500' : 'border-slate-600 hover:border-slate-400'}`}
+
+          /* ── LIST VIEW ─────────────────────────────────────── */
+          <div className="space-y-1.5 animate-fade-in">
+            {players.map((p, i) => {
+              const isSelected = selectedIds.has(p.id);
+              return (
+                <div
+                  key={p.id}
+                  style={{ animationDelay: `${i * 20}ms` }}
+                  className={`card px-4 py-3 flex items-center gap-3 cursor-pointer select-none
+                    transition-all duration-150 group animate-fade-in
+                    ${isSelected
+                      ? 'ring-1 ring-orange-500 bg-orange-500/[0.06]'
+                      : 'hover:bg-slate-800/60'}
+                  `}
+                  onClick={() => toggleSelect(p.id)}
+                >
+                  {/* checkbox */}
+                  <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all duration-150
+                    ${isSelected ? 'bg-orange-500 border-orange-500' : 'border-slate-600 opacity-0 group-hover:opacity-100'}
+                  `}>
+                    {isSelected && <Check className="w-2.5 h-2.5 text-white" />}
+                  </div>
+
+                  {/* avatar */}
+                  <PlayerPixelAvatar name={p.fullName} size="sm" />
+
+                  {/* name + meta */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-white truncate">{p.fullName}</p>
+                    <p className="text-xs text-slate-500 truncate">
+                      {[p.nickname && `"${p.nickname}"`, p.country].filter(Boolean).join(' · ') || <span className="opacity-40">—</span>}
+                    </p>
+                  </div>
+
+                  {/* actions */}
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => handleDelete(p.id)}
+                      disabled={deletingId === p.id}
+                      className="p-1.5 rounded-lg hover:bg-red-500/10 hover:text-red-400 text-slate-500 transition-all disabled:opacity-40"
+                      title="Obriši"
                     >
-                      {allSelected && <span className="text-white text-[10px] font-bold leading-none">✓</span>}
-                    </div>
-                  </th>
-                  <th className="text-left text-xs font-medium text-slate-400 px-4 py-3">Igrač</th>
-                  <th className="text-left text-xs font-medium text-slate-400 px-4 py-3">Nadimak</th>
-                  <th className="text-left text-xs font-medium text-slate-400 px-4 py-3">Zemlja</th>
-                  <th className="w-24" />
-                </tr>
-              </thead>
-              <tbody>
-                {players.map((p) => {
-                  const isSelected = selectedIds.has(p.id);
-                  return (
-                    <tr
-                      key={p.id}
-                      className={`border-b border-slate-700/40 transition-colors cursor-pointer ${isSelected ? 'bg-red-500/[0.06]' : 'hover:bg-slate-800/40'}`}
-                      onClick={() => toggleSelect(p.id)}
+                      {deletingId === p.id
+                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        : <Trash2 className="w-3.5 h-3.5" />}
+                    </button>
+                    <Link
+                      href={`/players/${p.id}`}
+                      className="text-xs text-slate-400 hover:text-orange-400 font-medium px-2.5 py-1.5 rounded-lg hover:bg-orange-500/10 transition-all whitespace-nowrap"
+                      onClick={(e) => e.stopPropagation()}
                     >
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        <div
-                          onClick={() => toggleSelect(p.id)}
-                          className={`w-4 h-4 rounded border-2 cursor-pointer flex items-center justify-center transition-colors ${isSelected ? 'bg-red-500 border-red-500' : 'border-slate-600 hover:border-slate-400'}`}
-                        >
-                          {isSelected && <span className="text-white text-[10px] font-bold leading-none">✓</span>}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        <Link href={`/players/${p.id}`} className="flex items-center gap-3 hover:text-orange-400 transition-colors">
-                          <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold text-white">
-                            {p.fullName?.[0]}
-                          </div>
-                          <span className="font-medium text-white">{p.fullName}</span>
-                        </Link>
-                      </td>
-                      <td className="px-4 py-3 text-slate-400" onClick={(e) => e.stopPropagation()}>{p.nickname || '—'}</td>
-                      <td className="px-4 py-3 text-slate-400" onClick={(e) => e.stopPropagation()}>{p.country || '—'}</td>
-                      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-1 justify-end">
-                          <button
-                            onClick={() => handleDelete(p.id, p.fullName)}
-                            disabled={deletingId === p.id}
-                            className="p-1.5 text-slate-500 hover:text-red-400 transition-colors disabled:opacity-50"
-                            title="Obriši igrača"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                          <Link href={`/players/${p.id}`} className="p-1.5 text-slate-500 hover:text-orange-400" onClick={(e) => e.stopPropagation()}>
-                            <ChevronRight className="w-4 h-4" />
-                          </Link>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      Detalji →
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
+
+      {/* ── floating bulk action bar ──────────────────────────────── */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 animate-fade-in-up">
+          <div className="flex items-center gap-3 bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 shadow-2xl shadow-black/40">
+            <span className="text-sm font-medium text-white whitespace-nowrap">
+              {selectedIds.size} izabran{selectedIds.size !== 1 ? 'o' : ''}
+            </span>
+            <div className="w-px h-4 bg-slate-600" />
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="text-xs text-slate-400 hover:text-white transition-colors px-2 py-1 rounded-lg hover:bg-slate-700"
+            >
+              Poništi
+            </button>
+            <button
+              onClick={() => setConfirmBulkDelete(true)}
+              disabled={bulkDeleting}
+              className="flex items-center gap-1.5 text-sm px-3 py-1.5 bg-red-500/15 text-red-400 hover:bg-red-500/25 rounded-xl transition-colors font-medium disabled:opacity-50 whitespace-nowrap"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Obriši
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── bulk delete confirm modal ─────────────────────────────── */}
+      {confirmBulkDelete && (
+        <div
+          className="fixed inset-0 flex items-center justify-center z-50 p-4 animate-fade-in"
+          style={{ backgroundColor: 'rgba(0,0,0,0.65)' }}
+          onClick={() => setConfirmBulkDelete(false)}
+        >
+          <div className="card p-6 w-full max-w-sm animate-scale-in" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start gap-4 mb-4">
+              <div className="w-11 h-11 rounded-2xl bg-red-500/15 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5 text-red-400" />
+              </div>
+              <div>
+                <h3 className="font-bold" style={{ color: 'var(--text-primary)' }}>Obriši igrače</h3>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>Ova radnja je nepovratna</p>
+              </div>
+            </div>
+            <p className="text-sm mb-5" style={{ color: 'var(--text-secondary)' }}>
+              Da li ste sigurni da želite da obrišete{' '}
+              <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>
+                {selectedIds.size} igrač{selectedIds.size !== 1 ? 'a' : 'a'}
+              </span>?
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={handleBulkDelete}
+                disabled={bulkDeleting}
+                className="flex-1 py-2.5 px-4 bg-red-500 hover:bg-red-600 disabled:opacity-50 text-white text-sm font-medium rounded-xl transition-colors flex items-center justify-center gap-2"
+              >
+                {bulkDeleting && <Loader2 className="w-4 h-4 animate-spin" />}
+                {bulkDeleting ? 'Brisanje...' : 'Da, obriši'}
+              </button>
+              <button
+                onClick={() => setConfirmBulkDelete(false)}
+                className="flex-1 py-2.5 px-4 text-sm font-medium rounded-xl transition-colors"
+                style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+              >
+                Otkaži
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

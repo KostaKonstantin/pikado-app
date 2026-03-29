@@ -102,8 +102,18 @@ export class AuthService {
         id: user.id,
         email: user.email,
         fullName: user.fullName,
+        avatarUrl: user.avatarUrl,
       },
-      club: club ? { id: club.id, name: club.name, slug: club.slug } : null,
+      club: club
+        ? {
+            id: club.id,
+            name: club.name,
+            slug: club.slug,
+            city: club.city,
+            country: club.country,
+            logoUrl: club.logoUrl,
+          }
+        : null,
       role,
     };
   }
