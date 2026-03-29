@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/auth.store';
+import { useSidebarStore } from '@/store/sidebar.store';
 import { leaguesApi } from '@/lib/api/leagues.api';
 import { playersApi } from '@/lib/api/players.api';
 import { Topbar } from '@/components/layout/topbar';
@@ -44,6 +45,7 @@ function StepDots({ step, total }: { step: number; total: number }) {
 export default function NewLeaguePage() {
   const router  = useRouter();
   const { club } = useAuthStore();
+  const { isCollapsed } = useSidebarStore();
 
   /* ── wizard state ──────────────────────────────────────────── */
   const [step,       setStep]       = useState(1);       // 1 = settings, 2 = players
@@ -531,7 +533,9 @@ export default function NewLeaguePage() {
 
       {/* ══ STICKY BOTTOM CTA (step 2) ════════════════════════════ */}
       {step === 2 && (
-        <div className="fixed bottom-0 inset-x-0 z-30 animate-fade-in"
+        <div
+          className={`fixed bottom-0 right-0 z-30 animate-fade-in left-0 transition-all duration-300
+            ${isCollapsed ? 'lg:left-16' : 'lg:left-64'}`}
           style={{
             background: 'linear-gradient(to top, var(--bg-primary) 70%, transparent)',
             paddingBottom: 'env(safe-area-inset-bottom, 12px)',
@@ -560,9 +564,10 @@ export default function NewLeaguePage() {
             </button>
             <button
               onClick={skipToLeague}
-              className="w-full text-xs text-slate-500 hover:text-slate-300 transition-colors py-1"
+              className="w-full text-sm text-slate-400 hover:text-white transition-colors py-1.5 flex items-center justify-center gap-1.5 group"
             >
-              Preskoči — dodaj igrače kasnije
+              <span className="group-hover:underline underline-offset-2">Preskoči</span>
+              <span className="text-slate-600 group-hover:text-slate-400 transition-colors">— dodaj igrače kasnije</span>
             </button>
           </div>
         </div>
