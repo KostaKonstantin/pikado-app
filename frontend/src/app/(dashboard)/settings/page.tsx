@@ -3,12 +3,14 @@ import { useState, useRef, useEffect } from 'react';
 import { useAuthStore } from '@/store/auth.store';
 import { usersApi } from '@/lib/api/users.api';
 import { clubsApi } from '@/lib/api/clubs.api';
+import { invitesApi } from '@/lib/api/invites.api';
 import { Topbar } from '@/components/layout/topbar';
 import { useTheme } from '@/lib/theme-context';
 import {
   Pencil, Check, X, Loader2, Camera, Shield, Building2,
   CreditCard, Settings, Moon, Sun, LogOut, Lock, AlertTriangle,
   ChevronDown, ChevronUp, User, Eye, EyeOff,
+  UserPlus, Mail, Clock, XCircle, RefreshCw, Users,
 } from 'lucide-react';
 
 // ── Editable Field ────────────────────────────────────────────────────────────
@@ -276,6 +278,189 @@ function PasswordSection() {
   );
 }
 
+// ── Members & Invites Section ─────────────────────────────────────────────────
+function MembersSection({ clubId }: { clubId: string }) {
+  const [members, setMembers] = useState<any[]>([]);
+  const [invites, setInvites] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [email, setEmail] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState('');
+  const [sendSuccess, setSendSuccess] = useState('');
+  const [actionId, setActionId] = useState<string | null>(null);
+
+  const roleLabel: Record<string, string> = {
+    club_admin: 'Admin',
+    organizer: 'Organizator',
+    viewer: 'Pregledač',
+  };
+
+  const load = async () => {
+    try {
+      const [m, i] = await Promise.all([
+        invitesApi.getMembers(clubId),
+        invitesApi.list(clubId),
+      ]);
+      setMembers(m);
+      setInvites(i.filter((inv: any) => inv.status === 'pending'));
+    } catch {}
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, [clubId]);
+
+  const handleInvite = async () => {
+    if (!email.trim()) return;
+    setSending(true); setSendError(''); setSendSuccess('');
+    try {
+      await invitesApi.create(clubId, email.trim());
+      setSendSuccess(`Pozivnica poslata na ${email.trim()}`);
+      setEmail('');
+      load();
+      setTimeout(() => setSendSuccess(''), 4000);
+    } catch (e: any) {
+      setSendError(e?.response?.data?.message || 'Greška pri slanju pozivnice');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleCancel = async (inviteId: string) => {
+    setActionId(inviteId);
+    try { await invitesApi.cancel(clubId, inviteId); load(); } catch {}
+    setActionId(null);
+  };
+
+  const handleResend = async (inviteId: string) => {
+    setActionId(inviteId);
+    try { await invitesApi.resend(clubId, inviteId); load(); } catch {}
+    setActionId(null);
+  };
+
+  return (
+    <div className="py-4 space-y-5">
+      {/* Invite form */}
+      <div>
+        <label className="form-label">Pozovi novog člana</label>
+        <div className="flex gap-2 mt-1.5">
+          <div className="relative flex-1">
+            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-secondary)' }} />
+            <input
+              type="email"
+              className="input-field"
+              style={{ paddingLeft: '2.25rem' }}
+              placeholder="email@primer.rs"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleInvite()}
+            />
+          </div>
+          <button
+            onClick={handleInvite}
+            disabled={sending || !email.trim()}
+            className="btn-primary text-sm px-4 shrink-0 flex items-center gap-2 disabled:opacity-50"
+          >
+            {sending
+              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              : <><UserPlus className="w-3.5 h-3.5" /> Pozovi</>
+            }
+          </button>
+        </div>
+        {sendError && <p className="text-xs text-red-400 mt-1.5 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> {sendError}</p>}
+        {sendSuccess && <p className="text-xs text-emerald-400 mt-1.5 flex items-center gap-1"><Check className="w-3 h-3" /> {sendSuccess}</p>}
+        <p className="text-xs mt-1.5" style={{ color: 'var(--text-secondary)' }}>
+          Primaće link za kreiranje naloga ili prijavu na klub. Pozivnica važi 48 sati.
+        </p>
+      </div>
+
+      {/* Pending invites */}
+      {invites.length > 0 && (
+        <div>
+          <p className="form-label mb-2">Čekaju na prihvatanje ({invites.length})</p>
+          <div className="space-y-2">
+            {invites.map((inv) => (
+              <div
+                key={inv.id}
+                className="flex items-center gap-3 p-3 rounded-xl"
+                style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
+              >
+                <div className="w-8 h-8 rounded-full bg-orange-500/10 flex items-center justify-center shrink-0">
+                  <Clock className="w-3.5 h-3.5 text-orange-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{inv.email}</p>
+                  <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                    Ističe {new Date(inv.expiresAt).toLocaleDateString('sr-RS')}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => handleResend(inv.id)}
+                    disabled={actionId === inv.id}
+                    title="Pošalji ponovo"
+                    className="p-1.5 rounded-lg transition-all hover:bg-blue-500/10 hover:text-blue-400 disabled:opacity-40"
+                    style={{ color: 'var(--text-secondary)' }}
+                  >
+                    {actionId === inv.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  </button>
+                  <button
+                    onClick={() => handleCancel(inv.id)}
+                    disabled={actionId === inv.id}
+                    title="Otkaži pozivnicu"
+                    className="p-1.5 rounded-lg transition-all hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40"
+                    style={{ color: 'var(--text-secondary)' }}
+                  >
+                    <XCircle className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Members list */}
+      <div>
+        <p className="form-label mb-2">Članovi ({members.length})</p>
+        {loading ? (
+          <div className="space-y-2">
+            {[1, 2].map((i) => (
+              <div key={i} className="skeleton h-12 rounded-xl" />
+            ))}
+          </div>
+        ) : members.length === 0 ? (
+          <p className="text-sm py-2" style={{ color: 'var(--text-secondary)' }}>Nema članova</p>
+        ) : (
+          <div className="space-y-2">
+            {members.map((m) => (
+              <div
+                key={m.id}
+                className="flex items-center gap-3 p-3 rounded-xl"
+                style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
+              >
+                <div className="w-8 h-8 rounded-full bg-orange-500/20 flex items-center justify-center text-xs font-bold text-orange-400 shrink-0">
+                  {(m.user?.fullName?.[0] || m.user?.email?.[0] || '?').toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                    {m.user?.fullName || m.user?.email}
+                  </p>
+                  {m.user?.fullName && (
+                    <p className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>{m.user.email}</p>
+                  )}
+                </div>
+                <span className="badge badge-active shrink-0 text-[10px]">
+                  {roleLabel[m.role] || m.role}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Section Card ─────────────────────────────────────────────────────────────
 function SectionCard({ icon: Icon, iconColor, iconBg, title, desc, children, delay = 0 }: {
   icon: any; iconColor: string; iconBg: string; title: string; desc?: string;
@@ -394,6 +579,13 @@ export default function SettingsPage() {
           />
           <div className="py-1" />
         </SectionCard>
+
+        {/* ── Members & Invites ───────────────────── */}
+        {role === 'club_admin' && club?.id && (
+          <SectionCard icon={Users} iconColor="text-teal-400" iconBg="bg-teal-500/10" title="Članovi i pozivnice" desc="Upravljajte pristupom vašem klubu" delay={125}>
+            <MembersSection clubId={club.id} />
+          </SectionCard>
+        )}
 
         {/* ── Permissions ─────────────────────────── */}
         <SectionCard icon={Shield} iconColor="text-purple-400" iconBg="bg-purple-500/10" title="Ovlašćenja" delay={150}>

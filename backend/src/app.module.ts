@@ -11,9 +11,11 @@ import { MatchesModule } from './matches/matches.module';
 import { LeaguesModule } from './leagues/leagues.module';
 import { RankingsModule } from './rankings/rankings.module';
 import { LiveModule } from './live/live.module';
+import { InvitesModule } from './invites/invites.module';
 
 // Entities
 import { User } from './users/entities/user.entity';
+import { Invite } from './invites/entities/invite.entity';
 import { Club } from './clubs/entities/club.entity';
 import { Membership } from './memberships/entities/membership.entity';
 import { Player } from './players/entities/player.entity';
@@ -38,6 +40,7 @@ import { Ranking } from './rankings/entities/ranking.entity';
         User, Club, Membership, Player, Season,
         Tournament, TournamentPlayer, Match,
         League, LeaguePlayer, LeagueMatch, LeagueSession, LeagueSubstitution, Ranking,
+        Invite,
       ],
       synchronize: true,
       logging: process.env.NODE_ENV === 'development',
@@ -53,6 +56,7 @@ import { Ranking } from './rankings/entities/ranking.entity';
     LeaguesModule,
     RankingsModule,
     LiveModule,
+    InvitesModule,
   ],
 })
 export class AppModule {}

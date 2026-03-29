@@ -14,7 +14,7 @@ function SkeletonDetail() {
       <div className="skeleton h-5 w-24 rounded" />
       <div className="card p-6">
         <div className="flex items-center gap-5">
-          <div className="skeleton w-20 h-20 rounded-full shrink-0" />
+          <div className="skeleton w-20 h-20 rounded-2xl shrink-0" />
           <div className="space-y-2">
             <div className="skeleton h-7 w-44 rounded" />
             <div className="skeleton h-4 w-28 rounded" />
@@ -68,8 +68,7 @@ export default function PlayerDetailPage() {
     }
   };
 
-  // Avatar color based on name
-  const avatarLetter = player?.fullName?.[0]?.toUpperCase() || '?';
+  const avatarSrc = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(player?.fullName || '?')}`;
 
   const chartData = stats ? [
     { name: 'Pobede', value: stats.wins, color: '#22c55e' },
@@ -104,10 +103,8 @@ export default function PlayerDetailPage() {
         <div className="card p-6 animate-fade-in-up">
           {!editing ? (
             <div className="flex items-center gap-5">
-              <div className="relative">
-                <div className="w-20 h-20 rounded-2xl bg-orange-500/20 border-2 border-orange-500/25 flex items-center justify-center text-3xl font-bold text-orange-400 shrink-0">
-                  {avatarLetter}
-                </div>
+              <div className="w-20 h-20 rounded-2xl bg-slate-800 overflow-hidden shrink-0 ring-1 ring-slate-700">
+                <img src={avatarSrc} alt={player.fullName} className="w-full h-full object-cover scale-110" />
               </div>
               <div className="flex-1 min-w-0">
                 <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{player.fullName}</h2>
@@ -237,9 +234,9 @@ export default function PlayerDetailPage() {
               </div>
             ) : (
               <div className="divide-y" style={{ '--tw-divide-opacity': 1 } as any}>
-                {(history.leagueMatches || []).slice(0, 10).map((m: any) => {
+                {(history.leagueMatches || []).filter((m: any) => m.status === 'completed').slice(0, 10).map((m: any) => {
                   const won = m.winnerId === id;
-                  const draw = !m.winnerId && m.status === 'completed';
+                  const draw = !m.winnerId;
                   return (
                     <div
                       key={m.id}

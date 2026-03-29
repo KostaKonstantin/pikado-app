@@ -16,6 +16,7 @@ import {
   AlertCircle, X, ArrowLeftRight, Ban, ChevronRight,
   Trophy, Target, Zap, CheckCircle2, Download, Lock, Unlock,
   UserCheck, ChevronDown, ChevronUp, QrCode, Copy, Check, Search,
+  MoreHorizontal,
 } from 'lucide-react';
 import QRCodeSVG from 'react-qr-code';
 
@@ -23,12 +24,41 @@ type Tab = 'tabela' | 'raspored' | 'odlozeni' | 'igraci';
 
 /* ─── helpers ──────────────────────────────────────────────────────── */
 
-function Avatar({ name, size = 'sm' }: { name?: string; size?: 'sm' | 'md' }) {
-  const initials = (name || '?').split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
-  const sz = size === 'md' ? 'w-10 h-10 text-sm' : 'w-7 h-7 text-xs';
+function avatarRarity(name: string): 'common' | 'rare' | 'epic' | 'legendary' {
+  const h = Array.from(name || '').reduce((acc, c) => ((acc * 31) + c.charCodeAt(0)) & 0xffff, 7) % 100;
+  if (h >= 97) return 'legendary';
+  if (h >= 85) return 'epic';
+  if (h >= 60) return 'rare';
+  return 'common';
+}
+
+const RARITY_RING: Record<string, string> = {
+  legendary: 'ring-2 ring-yellow-400/80 shadow-lg shadow-yellow-400/30',
+  epic:      'ring-2 ring-violet-500/70 shadow-lg shadow-violet-500/20',
+  rare:      'ring-2 ring-blue-400/60',
+  common:    '',
+};
+
+function Avatar({ name, size = 'sm' }: { name?: string; size?: 'sm' | 'md' | 'lg' }) {
+  const seed = encodeURIComponent(name || '?');
+  const src  = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${seed}`;
+  const rarity = avatarRarity(name || '');
+  const sz =
+    size === 'lg' ? 'w-14 h-14' :
+    size === 'md' ? 'w-10 h-10' :
+                   'w-7 h-7';
+  const rounded = size === 'lg' ? 'rounded-2xl' : 'rounded-full';
+
   return (
-    <div className={`${sz} rounded-full bg-slate-700 flex items-center justify-center font-bold text-slate-300 shrink-0`}>
-      {initials}
+    <div className={`relative ${sz} ${rounded} bg-slate-700 overflow-hidden shrink-0 ${RARITY_RING[rarity]}`}>
+      <img
+        src={src}
+        alt={name || '?'}
+        className={`w-full h-full object-cover transition-transform duration-200 hover:scale-110 ${size === 'lg' ? 'scale-110' : ''}`}
+      />
+      {rarity === 'legendary' && (
+        <div className="absolute inset-0 animate-shimmer pointer-events-none" />
+      )}
     </div>
   );
 }
@@ -71,7 +101,13 @@ function PlayerCombobox({
   );
 
   useEffect(() => {
-    if (open) setTimeout(() => inputRef.current?.focus(), 50);
+    if (open) {
+      // Skip autofocus on touch devices — keyboard popping up compresses the modal viewport
+      const isTouch =
+        typeof window !== 'undefined' &&
+        window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+      if (!isTouch) setTimeout(() => inputRef.current?.focus(), 50);
+    }
   }, [open]);
 
   const select = (lp: any) => {
@@ -210,6 +246,12 @@ export default function LeagueDetailPage() {
   const [closingSession, setClosingSession]   = useState<string | null>(null);
   const [deletingSession, setDeletingSession] = useState<string | null>(null);
   const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
+
+  // Mobile bottom action bar
+  const [showMoreSheet, setShowMoreSheet]       = useState(false);
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+  const [bottomBarVisible, setBottomBarVisible] = useState(true);
+  const lastScrollRef = useRef(0);
 
   // Substitution history
   const [substitutions, setSubstitutions] = useState<any[]>([]);
@@ -431,15 +473,29 @@ export default function LeagueDetailPage() {
     setManualCheck(null);
   };
 
-  const runManualCheck = async (homeId: string, awayId: string, sessionId: string) => {
-    if (!homeId || !awayId || homeId === awayId || !club?.id) { setManualCheck(null); return; }
+  // Run check whenever either player changes.
+  // No cancellation pattern — calls are short-lived & idempotent, and the cancelled-closure
+  // approach caused the spinner to stick on mobile (touch scroll events triggered re-renders
+  // that set cancelled=true just before the API call completed).
+  useEffect(() => {
+    if (!manualHome || !manualAway || manualHome === manualAway || !manualMatchSession || !club?.id) {
+      setManualCheck(null);
+      setManualChecking(false);
+      return;
+    }
     setManualChecking(true);
-    try {
-      const result = await leaguesApi.checkManualMatch(club.id, id, sessionId, homeId, awayId);
-      setManualCheck(result);
-    } catch { setManualCheck(null); }
-    finally { setManualChecking(false); }
-  };
+    setManualCheck(null);
+    leaguesApi
+      .checkManualMatch(club.id, id, manualMatchSession.id, manualHome, manualAway)
+      .then((result) => { setManualCheck(result); })
+      .catch((err) => {
+        console.error('[checkManualMatch]', err);
+        const msg = err?.response?.data?.message ?? 'Greška pri proveri meča';
+        setManualCheck({ status: 'error', message: msg });
+      })
+      .finally(() => { setManualChecking(false); });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualHome, manualAway, manualMatchSession?.id]);
 
   const handleAddManualMatch = async () => {
     if (!club?.id || !manualMatchSession || !manualHome || !manualAway) return;
@@ -457,6 +513,11 @@ export default function LeagueDetailPage() {
   // Multi-select players
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  // Player hub search / sort / add panel
+  const [playerSearch, setPlayerSearch] = useState('');
+  const [playerSort, setPlayerSort] = useState<'points' | 'name'>('points');
+  const [addPanelOpen, setAddPanelOpen] = useState(false);
 
   const toggleSelectPlayer = (playerId: string) => {
     setSelectedPlayerIds((prev) => {
@@ -506,6 +567,18 @@ export default function LeagueDetailPage() {
   };
 
   useEffect(() => { load(); }, [club?.id, id]);
+
+  // Auto-hide bottom bar on scroll down, show on scroll up
+  useEffect(() => {
+    const onScroll = () => {
+      const y = window.scrollY;
+      if (y > lastScrollRef.current + 10) setBottomBarVisible(false);
+      else if (y < lastScrollRef.current - 10) setBottomBarVisible(true);
+      lastScrollRef.current = y;
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   /* ── actions ─────────────────────────────────────────────── */
   const addPlayer    = async (playerId: string) => { await leaguesApi.addPlayer(club!.id, id, playerId); load(); };
@@ -604,6 +677,9 @@ export default function LeagueDetailPage() {
 
   // Mode driven by league.mode: 'session' = flexible evenings; 'round' = full upfront schedule
   const isSessionMode = league?.mode === 'session';
+
+  // Computed for sticky mobile action bar
+  const activeSessionForBar = sessions.find((s: any) => s.status === 'open');
 
   const byEvening: Record<number, any[]> = {};
   if (!isSessionMode) {
@@ -706,7 +782,7 @@ export default function LeagueDetailPage() {
               )}
             </div>
             {stats.isGenerated && (
-              <div className="mt-2 h-1 bg-slate-700 rounded-full overflow-hidden">
+              <div className="mt-2 h-1 rounded-full overflow-hidden progress-track">
                 <div
                   className="h-full rounded-full transition-all duration-700"
                   style={{
@@ -747,191 +823,333 @@ export default function LeagueDetailPage() {
         {/* ══════════════════ TABELA ══════════════════════════ */}
         {tab === 'tabela' && (
           <div className="animate-fade-in-up space-y-4">
-            <div className="card overflow-hidden">
-              {/* Header */}
-              <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between gap-2 flex-wrap">
-                <h3 className="font-semibold text-white flex items-center gap-2 text-sm">
-                  <BarChart3 className="w-4 h-4 text-slate-400" /> Tabela
-                </h3>
-                <div className="flex items-center gap-2 flex-wrap">
-                  {/* QR disabled for now */}
-                  {/* {league?.slug && (
-                    <button
-                      onClick={() => setShowQr(true)}
-                      className="flex items-center gap-1.5 text-xs py-1.5 px-3 rounded-lg border border-slate-600 text-slate-300 hover:border-orange-500 hover:text-orange-400 transition-colors"
-                      title="QR kod za javnu tabelu"
-                    >
-                      <QrCode className="w-3.5 h-3.5" /> QR
-                    </button>
-                  )} */}
-                  {fixtures.length > 0 && (
-                    <button
-                      onClick={handleDownloadPlayerSheet}
-                      disabled={downloadingPlayerSheet}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-700/60 border border-slate-600 text-slate-300 text-sm font-medium hover:bg-slate-700 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {downloadingPlayerSheet
-                        ? <><span className="animate-spin w-4 h-4 border-2 border-slate-400/30 border-t-slate-300 rounded-full" /><span className="hidden sm:inline">Generisanje...</span></>
-                        : <><Download className="w-4 h-4 shrink-0" /><span className="hidden sm:inline">Lista igrača</span><span className="sm:hidden">Lista</span></>
-                      }
-                    </button>
-                  )}
-                  {standings.length > 0 && (
-                    <button
-                      onClick={handleDownloadStandings}
-                      disabled={downloadingStandings}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-400 text-sm font-medium hover:bg-orange-500/20 hover:border-orange-500/60 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {downloadingStandings
-                        ? <><span className="animate-spin w-4 h-4 border-2 border-orange-400/30 border-t-orange-400 rounded-full" /><span className="hidden sm:inline">Generisanje...</span></>
-                        : <><Download className="w-4 h-4 shrink-0" /><span className="hidden sm:inline">Tabela PDF</span><span className="sm:hidden">PDF</span></>
-                      }
-                    </button>
-                  )}
-                  {canEdit && (
-                    <button
-                      onClick={generate}
-                      disabled={generating}
-                      className="btn-primary text-xs py-2 px-4 disabled:opacity-50"
-                    >
-                      {generating
-                        ? <><span className="animate-spin inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full mr-1.5" />Generisanje...</>
-                        : fixtures.length > 0 ? 'Regeneriši' : 'Generiši Raspored'
-                      }
-                    </button>
-                  )}
-                </div>
-              </div>
 
-              {standings.length === 0 ? (
+            {/* ── Action bar ─────────────────────────────────────── */}
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <h3 className="font-semibold text-white flex items-center gap-2 text-sm">
+                <BarChart3 className="w-4 h-4 text-slate-400" /> Tabela
+                {standings.length > 0 && (
+                  <span className="text-[11px] text-slate-500 font-normal">{standings.length} igrača</span>
+                )}
+              </h3>
+              <div className="flex items-center gap-2 flex-wrap">
+                {fixtures.length > 0 && (
+                  <button
+                    onClick={handleDownloadPlayerSheet}
+                    disabled={downloadingPlayerSheet}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-700/60 border border-slate-600 text-slate-300 text-xs font-medium hover:bg-slate-700 hover:text-white transition-all disabled:opacity-50"
+                  >
+                    {downloadingPlayerSheet
+                      ? <span className="animate-spin w-3.5 h-3.5 border-2 border-slate-400/30 border-t-slate-300 rounded-full" />
+                      : <Download className="w-3.5 h-3.5 shrink-0" />
+                    }
+                    <span className="hidden sm:inline">Lista igrača</span>
+                  </button>
+                )}
+                {standings.length > 0 && (
+                  <button
+                    onClick={handleDownloadStandings}
+                    disabled={downloadingStandings}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-400 text-xs font-medium hover:bg-orange-500/20 transition-all disabled:opacity-50"
+                  >
+                    {downloadingStandings
+                      ? <span className="animate-spin w-3.5 h-3.5 border-2 border-orange-400/30 border-t-orange-400 rounded-full" />
+                      : <Download className="w-3.5 h-3.5 shrink-0" />
+                    }
+                    <span className="hidden sm:inline">Tabela PDF</span>
+                  </button>
+                )}
+                {canEdit && (
+                  <button onClick={generate} disabled={generating} className="btn-primary text-xs py-1.5 px-3 disabled:opacity-50">
+                    {generating
+                      ? <><span className="animate-spin inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full mr-1" />Generisanje...</>
+                      : fixtures.length > 0 ? 'Regeneriši' : 'Generiši Raspored'
+                    }
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {standings.length === 0 ? (
+              <div className="card">
                 <EmptyState
                   icon={<BarChart3 className="w-10 h-10" />}
                   title="Nema podataka"
                   desc="Dodajte igrače i generišite raspored da biste videli tabelu."
                 />
-              ) : (
-                <>
-                  {/* Desktop table */}
-                  <div className="hidden md:block overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-slate-700">
-                          {['#', 'Igrač', 'M', 'P', 'R', 'G', 'L+', 'L-', 'Bod.'].map((h) => (
-                            <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-700/50">
-                        {standings.map((s, idx) => (
-                          <tr
-                            key={s.player?.id || s.position}
-                            className={[
-                              'transition-colors',
-                              s.position === 1 ? 'bg-yellow-500/[0.04]' : 'hover:bg-slate-800/40',
-                            ].join(' ')}
-                            style={{ animationDelay: `${idx * 30}ms` }}
-                          >
-                            <td className="px-4 py-3"><RankBadge pos={s.position} /></td>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                <Avatar name={s.player?.fullName} />
-                                <span className="font-medium text-white text-sm">{s.player?.fullName}</span>
-                                {s.position === 1 && <Trophy className="w-3.5 h-3.5 text-yellow-400" />}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-slate-400 tabular-nums">{s.played}</td>
-                            <td className="px-4 py-3 text-green-400 font-medium tabular-nums">{s.won}</td>
-                            <td className="px-4 py-3 text-yellow-400 font-medium tabular-nums">{s.drawn}</td>
-                            <td className="px-4 py-3 text-red-400 font-medium tabular-nums">{s.lost}</td>
-                            <td className="px-4 py-3 text-slate-300 tabular-nums">{s.setsFor}</td>
-                            <td className="px-4 py-3 text-slate-500 tabular-nums">{s.setsAgainst}</td>
-                            <td className="px-4 py-3">
-                              <span className="font-bold text-orange-400 text-base tabular-nums">{s.points}</span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+              </div>
+            ) : (() => {
+              const winRate = (s: any) => s.played > 0 ? Math.round((s.won / s.played) * 100) : 0;
+              const top3 = standings.slice(0, 3);
+              const bestWins = [...standings].sort((a, b) => b.won - a.won)[0];
+              const mostSets = [...standings].sort((a, b) => b.setsFor - a.setsFor)[0];
+              const ptGap = standings.length > 1 ? standings[0].points - standings[1].points : 0;
+              const top5wr = standings.slice(0, Math.min(5, standings.length));
+              const maxWr = Math.max(...top5wr.map(winRate), 1);
 
-                  {/* Mobile cards */}
-                  <div className="md:hidden divide-y divide-slate-700/50">
-                    {standings.map((s) => (
-                      <div key={s.player?.id || s.position}
-                        className={`px-4 py-3 ${s.position === 1 ? 'bg-yellow-500/[0.04]' : ''}`}>
-                        <div className="flex items-center gap-3">
-                          <RankBadge pos={s.position} />
-                          <Avatar name={s.player?.fullName} />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-semibold text-white text-sm truncate">{s.player?.fullName}</span>
-                              {s.position === 1 && <Trophy className="w-3 h-3 text-yellow-400 shrink-0" />}
-                            </div>
-                            <div className="flex items-center gap-3 mt-0.5">
-                              <span className="text-[11px] text-green-400">{s.won}P</span>
-                              <span className="text-[11px] text-yellow-400">{s.drawn}R</span>
-                              <span className="text-[11px] text-red-400">{s.lost}G</span>
-                              <span className="text-[11px] text-slate-500">{s.setsFor}/{s.setsAgainst} L</span>
-                            </div>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <span className="text-lg font-bold text-orange-400 tabular-nums">{s.points}</span>
-                            <p className="text-[11px] text-slate-500">{s.played} odig.</p>
-                          </div>
+              const medalColor = (pos: number) =>
+                pos === 1 ? 'rgba(234,179,8,0.12)'  :
+                pos === 2 ? 'rgba(148,163,184,0.10)' :
+                            'rgba(180,83,9,0.10)';
+              const medalBorder = (pos: number) =>
+                pos === 1 ? 'rgba(234,179,8,0.30)'  :
+                pos === 2 ? 'rgba(148,163,184,0.25)' :
+                            'rgba(180,83,9,0.28)';
+              const medalText = (pos: number) =>
+                pos === 1 ? '#facc15' : pos === 2 ? '#cbd5e1' : '#f97316';
+              const medalEmoji = (pos: number) =>
+                pos === 1 ? '🥇' : pos === 2 ? '🥈' : '🥉';
+
+              return (
+                <>
+                  {/* ── TOP 3 PODIUM ─────────────────────────────── */}
+                  <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                    {top3.map((s, i) => (
+                      <div
+                        key={s.player?.id}
+                        onClick={() => setSelectedPlayer(lPlayers.find((lp: any) => lp.playerId === s.player?.id))}
+                        className={`rounded-2xl p-3 sm:p-4 flex flex-col items-center gap-2 cursor-pointer transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${
+                          s.position === 1 ? 'animate-fade-in-up' : 'animate-fade-in-up'
+                        }`}
+                        style={{
+                          backgroundColor: medalColor(s.position),
+                          border: `1px solid ${medalBorder(s.position)}`,
+                          boxShadow: s.position === 1
+                            ? '0 0 24px rgba(234,179,8,0.08), 0 4px 16px rgba(0,0,0,0.2)'
+                            : '0 2px 8px rgba(0,0,0,0.12)',
+                          animationDelay: `${i * 60}ms`,
+                        }}
+                      >
+                        <span className="text-xl sm:text-2xl leading-none">{medalEmoji(s.position)}</span>
+                        <div
+                          className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-sm font-bold ${
+                            s.position === 1 ? 'bg-yellow-400/20 text-yellow-400' :
+                            s.position === 2 ? 'bg-slate-400/15 text-slate-300' :
+                                               'bg-orange-700/20 text-orange-500'
+                          }`}
+                        >
+                          {(s.player?.fullName || '?').split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()}
+                        </div>
+                        <div className="text-center min-w-0 w-full">
+                          <p className="text-xs sm:text-sm font-bold text-white truncate leading-tight">
+                            {s.player?.fullName?.split(' ')[0]}
+                          </p>
+                          <p className="text-[10px] text-slate-400 truncate hidden sm:block">
+                            {s.player?.fullName?.split(' ').slice(1).join(' ')}
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-center">
+                          <span
+                            className="text-lg sm:text-2xl font-black tabular-nums leading-none"
+                            style={{ color: medalText(s.position) }}
+                          >
+                            {s.points}
+                          </span>
+                          <span className="text-[10px] text-slate-500">bod.</span>
+                        </div>
+                        <div className="text-[10px] text-slate-500">
+                          {winRate(s)}% pobeda
                         </div>
                       </div>
                     ))}
                   </div>
-                </>
-              )}
-            </div>
 
-            {/* Legend */}
-            {standings.length > 0 && (
-              <div className="flex flex-wrap gap-3 px-1">
-                {[
-                  { color: 'text-green-400', label: 'P – Pobeda' },
-                  { color: 'text-yellow-400', label: 'R – Remi' },
-                  { color: 'text-red-400', label: 'G – Gubitak' },
-                  { color: 'text-slate-400', label: 'M – Mečevi' },
-                ].map(({ color, label }) => (
-                  <span key={label} className={`text-[11px] ${color}`}>{label}</span>
-                ))}
-              </div>
-            )}
+                  {/* ── INSIGHTS ─────────────────────────────────── */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {[
+                      { icon: <Trophy className="w-3.5 h-3.5 text-yellow-400" />, label: 'Lider', value: standings[0]?.player?.fullName?.split(' ')[0], sub: `${standings[0]?.points} bod.`, color: 'text-yellow-400' },
+                      { icon: <Zap className="w-3.5 h-3.5 text-green-400" />, label: 'Najviše pobeda', value: bestWins?.player?.fullName?.split(' ')[0], sub: `${bestWins?.won} P`, color: 'text-green-400' },
+                      { icon: <Target className="w-3.5 h-3.5 text-orange-400" />, label: 'Najviše setova', value: mostSets?.player?.fullName?.split(' ')[0], sub: `${mostSets?.setsFor} L+`, color: 'text-orange-400' },
+                      { icon: <BarChart3 className="w-3.5 h-3.5 text-blue-400" />, label: 'Prednost #1', value: ptGap === 0 ? 'Izjednačeno' : `+${ptGap}`, sub: ptGap === 0 ? '—' : 'bodova pred #2', color: 'text-blue-400' },
+                    ].map((ins, i) => (
+                      <div
+                        key={ins.label}
+                        className="card p-3 animate-fade-in-up"
+                        style={{ animationDelay: `${i * 50}ms` }}
+                      >
+                        <div className="flex items-center gap-1.5 mb-1.5">
+                          {ins.icon}
+                          <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">{ins.label}</span>
+                        </div>
+                        <p className={`text-sm font-bold truncate ${ins.color}`}>{ins.value}</p>
+                        <p className="insight-sub">{ins.sub}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* ── WIN RATE CHART ────────────────────────────── */}
+                  <div className="card p-4">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
+                      % Pobeda · Top {top5wr.length}
+                    </p>
+                    <div className="space-y-2.5">
+                      {top5wr.map((s, i) => {
+                        const wr = winRate(s);
+                        return (
+                          <div key={s.player?.id} className="flex items-center gap-3 animate-fade-in" style={{ animationDelay: `${i * 40}ms` }}>
+                            <span className="text-[11px] text-slate-500 w-4 tabular-nums text-right shrink-0">{i + 1}</span>
+                            <span className="text-xs text-slate-300 w-20 truncate shrink-0">{s.player?.fullName?.split(' ')[0]}</span>
+                            <div className="flex-1 h-2 rounded-full overflow-hidden progress-track">
+                              <div
+                                className="h-full rounded-full transition-all duration-700 ease-out"
+                                style={{
+                                  width: `${(wr / maxWr) * 100}%`,
+                                  background: i === 0
+                                    ? 'linear-gradient(90deg,#facc15,#f97316)'
+                                    : 'linear-gradient(90deg,#f97316,#fb923c)',
+                                  animationDelay: `${i * 80}ms`,
+                                }}
+                              />
+                            </div>
+                            <span className="text-[11px] font-semibold tabular-nums w-8 text-right shrink-0" style={{ color: i === 0 ? '#facc15' : '#fb923c' }}>
+                              {wr}%
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* ── FULL TABLE ───────────────────────────────── */}
+                  <div className="card overflow-hidden">
+                    {/* Desktop table */}
+                    <div className="hidden md:block overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
+                            {['#', 'Igrač', 'M', 'P', 'R', 'G', 'L+', 'L−', 'Bod.'].map((h) => (
+                              <th key={h} className="text-left text-[10px] font-semibold uppercase tracking-widest px-4 py-2.5" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {standings.map((s, idx) => (
+                            <tr
+                              key={s.player?.id || s.position}
+                              onClick={() => setSelectedPlayer(lPlayers.find((lp: any) => lp.playerId === s.player?.id))}
+                              className="cursor-pointer transition-colors animate-fade-in table-row-hover"
+                              style={{
+                                borderBottom: '1px solid var(--border)',
+                                backgroundColor: s.position === 1 ? 'rgba(234,179,8,0.03)' : undefined,
+                                animationDelay: `${idx * 25}ms`,
+                              }}
+                            >
+                              <td className="px-4 py-3 w-10">
+                                <RankBadge pos={s.position} />
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2.5">
+                                  <Avatar name={s.player?.fullName} />
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-semibold text-white text-sm truncate">{s.player?.fullName}</span>
+                                      {s.position === 1 && <Trophy className="w-3 h-3 text-yellow-400 shrink-0" />}
+                                    </div>
+                                    <div className="flex items-center gap-1.5 mt-0.5">
+                                      <div className="h-1 w-12 rounded-full overflow-hidden progress-track">
+                                        <div
+                                          className="h-full rounded-full"
+                                          style={{
+                                            width: `${winRate(s)}%`,
+                                            backgroundColor: winRate(s) >= 60 ? '#4ade80' : winRate(s) >= 40 ? '#fb923c' : '#f87171',
+                                          }}
+                                        />
+                                      </div>
+                                      <span className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>{winRate(s)}%</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-slate-400 tabular-nums">{s.played}</td>
+                              <td className="px-4 py-3 font-semibold text-green-400 tabular-nums">{s.won}</td>
+                              <td className="px-4 py-3 font-medium text-yellow-400 tabular-nums">{s.drawn}</td>
+                              <td className="px-4 py-3 font-medium text-red-400 tabular-nums">{s.lost}</td>
+                              <td className="px-4 py-3 text-slate-300 tabular-nums">{s.setsFor}</td>
+                              <td className="px-4 py-3 text-slate-500 tabular-nums">{s.setsAgainst}</td>
+                              <td className="px-4 py-3">
+                                <span className="text-lg font-black text-orange-400 tabular-nums leading-none">{s.points}</span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Mobile cards */}
+                    <div className="md:hidden divide-y" style={{ borderColor: 'var(--border)' }}>
+                      {standings.map((s, idx) => (
+                        <div
+                          key={s.player?.id || s.position}
+                          onClick={() => setSelectedPlayer(lPlayers.find((lp: any) => lp.playerId === s.player?.id))}
+                          className="px-4 py-3.5 cursor-pointer active:bg-slate-800/50 transition-colors animate-fade-in"
+                          style={{
+                            backgroundColor: s.position === 1 ? 'rgba(234,179,8,0.03)' : undefined,
+                            animationDelay: `${idx * 25}ms`,
+                          }}
+                        >
+                          <div className="flex items-center gap-3">
+                            <RankBadge pos={s.position} />
+                            <Avatar name={s.player?.fullName} />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-semibold text-white text-sm truncate">{s.player?.fullName}</span>
+                                {s.position === 1 && <Trophy className="w-3 h-3 text-yellow-400 shrink-0" />}
+                              </div>
+                              <div className="flex items-center gap-2.5 mt-1">
+                                <span className="text-[11px] font-medium text-green-400">{s.won}P</span>
+                                {s.drawn > 0 && <span className="text-[11px] font-medium text-yellow-400">{s.drawn}R</span>}
+                                <span className="text-[11px] font-medium text-red-400">{s.lost}G</span>
+                                <span className="text-[11px] text-slate-500">{s.played} M</span>
+                                <span className="text-[11px] text-slate-600">{s.setsFor}/{s.setsAgainst}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 mt-1.5">
+                                <div className="h-1 w-20 rounded-full overflow-hidden progress-track">
+                                  <div
+                                    className="h-full rounded-full"
+                                    style={{
+                                      width: `${winRate(s)}%`,
+                                      backgroundColor: winRate(s) >= 60 ? '#4ade80' : winRate(s) >= 40 ? '#fb923c' : '#f87171',
+                                    }}
+                                  />
+                                </div>
+                                <span className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>{winRate(s)}%</span>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <span className="text-2xl font-black text-orange-400 tabular-nums leading-none">{s.points}</span>
+                              <p className="text-[10px] text-slate-500 mt-0.5">bodova</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Legend */}
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 px-1">
+                    {[
+                      { color: 'text-green-400', label: 'P – Pobeda' },
+                      { color: 'text-yellow-400', label: 'R – Remi' },
+                      { color: 'text-red-400', label: 'G – Gubitak' },
+                      { color: 'text-slate-400', label: 'M – Mečevi' },
+                      { color: 'text-slate-500', label: 'L+/L− – Setovi' },
+                    ].map(({ color, label }) => (
+                      <span key={label} className={`text-[11px] ${color}`}>{label}</span>
+                    ))}
+                  </div>
+                </>
+              );
+            })()}
           </div>
         )}
 
         {/* ══════════════════ RASPORED ════════════════════════ */}
         {tab === 'raspored' && (
-          <div className="animate-fade-in-up space-y-3">
+          <div className={`animate-fade-in-up space-y-3 ${canEdit && activeSessionForBar && isSessionMode ? 'pb-32 lg:pb-0' : ''}`}>
 
-            {/* ── NEW session system ─────────────────────────────── */}
+            {/* ── SESSION MODE ─────────────────────────────────────── */}
             {isSessionMode ? (
               <>
-                {/* Header */}
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div>
-                    <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                      <Calendar className="w-4 h-4 text-slate-400" /> Sesije ligaških dana
-                    </h3>
-                    {fixtures.length > 0 && (
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        Pool: {fixtures.filter((m: any) => m.status === 'pending' && !m.sessionId).length} neodigranih · {fixtures.filter((m: any) => m.sessionId).length} raspoređenih
-                      </p>
-                    )}
-                  </div>
-                  {canEdit && fixtures.length > 0 && (
-                    <button
-                      onClick={openNewSession}
-                      className="btn-primary text-sm py-2 px-4 flex items-center gap-1.5"
-                    >
-                      <Plus className="w-4 h-4" /> Novi Ligaški Dan
-                    </button>
-                  )}
-                </div>
-
-                {/* Empty states */}
                 {fixtures.length === 0 ? (
                   <EmptyState
                     icon={<Calendar className="w-10 h-10" />}
@@ -951,216 +1169,488 @@ export default function LeagueDetailPage() {
                       Pool ima {fixtures.length} mečeva. Odaberi prisutne igrače i kreiraj prvi ligaški dan.
                     </p>
                     {canEdit && (
-                      <button onClick={openNewSession} className="btn-primary text-sm mx-auto">
+                      <button onClick={openNewSession} className="btn-primary text-sm mx-auto flex items-center gap-1.5">
                         <Plus className="w-4 h-4" /> Nova sesija
                       </button>
                     )}
                   </div>
-                ) : (
-                  // Session cards
-                  sessions.map((session: any) => {
-                    const isExpanded = expandedSessions.has(session.id);
-                    const sessionMatches: any[] = fixtures.filter((m: any) => m.sessionId === session.id);
-                    const completedCount = sessionMatches.filter((m: any) => m.status === 'completed').length;
-                    const allDone = session.status === 'closed' || completedCount === session.matchCount;
-                    const isOpen = session.status === 'open';
+                ) : (() => {
+                  const totalInSessions = sessions.reduce((a: number, s: any) => a + (s.matchCount || 0), 0);
+                  const completedTotal  = sessions.reduce((a: number, s: any) => a + (s.completedCount || 0), 0);
+                  const pendingInPool   = fixtures.filter((m: any) => m.status === 'pending' && !m.sessionId).length;
+                  const pct = totalInSessions > 0 ? Math.round((completedTotal / totalInSessions) * 100) : 0;
+                  const activeSession   = sessions.find((s: any) => s.status === 'open');
+                  const closedSessions  = sessions.filter((s: any) => s.status !== 'open');
 
-                    // Use session.matches if present (from getSession), else from fixtures
-                    const displayMatches = sessionMatches.length > 0 ? sessionMatches : [];
-
-                    return (
-                      <div key={session.id} className="card overflow-hidden">
-                        {/* Session header */}
-                        <div
-                          className={`px-4 py-3 border-b border-slate-700/60 cursor-pointer select-none ${
-                            allDone ? 'bg-green-500/5' : 'bg-slate-800/40'
-                          }`}
-                          onClick={() => toggleExpanded(session.id)}
-                        >
-                          {/* Title row */}
-                          <div className="flex items-center gap-3">
-                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 ${
-                              allDone ? 'bg-green-500/20 text-green-400' : isOpen ? 'bg-orange-500/20 text-orange-400' : 'bg-slate-700 text-white'
-                            }`}>
-                              {session.sessionNumber}
+                  return (
+                    <>
+                      {/* ── HEADER / OVERVIEW CARD ─────────────────────────── */}
+                      <div className="card p-4">
+                        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <Calendar className="w-4 h-4 text-orange-400 shrink-0" />
+                              <span className="text-sm font-semibold text-white">Raspored ligaških dana</span>
                             </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <p className="text-sm font-semibold text-white">Ligaški Dan {session.sessionNumber}</p>
-                                {isOpen
-                                  ? <span className="text-[10px] px-1.5 py-0.5 bg-orange-500/15 text-orange-400 rounded-full font-medium flex items-center gap-0.5"><Unlock className="w-2.5 h-2.5" />Otvorena</span>
-                                  : <span className="text-[10px] px-1.5 py-0.5 bg-slate-700 text-slate-400 rounded-full font-medium flex items-center gap-0.5"><Lock className="w-2.5 h-2.5" />Zatvorena</span>
-                                }
-                                {allDone && <span className="text-[10px] text-green-400 font-medium flex items-center gap-0.5"><CheckCircle2 className="w-3 h-3" />Završena</span>}
-                              </div>
-                              <div className="flex items-center flex-wrap gap-x-2 gap-y-0 mt-0.5">
-                                <span className="text-xs text-slate-500">{session.completedCount}/{session.matchCount} odigrano</span>
-                                <span className="text-xs text-slate-600">·</span>
-                                <span className="text-xs text-slate-500">{session.presentPlayerIds?.length ?? 0} igrača</span>
-                                {session.sessionDate && (
-                                  <>
-                                    <span className="text-xs text-slate-600">·</span>
-                                    <span className="text-xs text-slate-500">{new Date(session.sessionDate).toLocaleDateString('sr-RS')}</span>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                            <div className="p-2 text-slate-500 rounded-lg shrink-0">
-                              {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                            </div>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                              <span className="text-white font-semibold">{completedTotal}</span>
+                              <span className="text-slate-500"> / {totalInSessions} odigrano</span>
+                              {pendingInPool > 0 && (
+                                <span className="text-slate-600 ml-2">· {pendingInPool} u pool-u</span>
+                              )}
+                            </p>
                           </div>
-
-                          {/* Action buttons row */}
-                          <div className="flex items-center gap-1.5 mt-2.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                          {canEdit && (
                             <button
-                              onClick={() => handleDownloadScoresheet(session, displayMatches)}
-                              disabled={downloadingScoresheet === session.id}
-                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 hover:text-orange-300 rounded-lg transition-colors font-medium disabled:opacity-50"
-                              title="Preuzmi raspored ligaškog dana za štampu">
-                              {downloadingScoresheet === session.id
-                                ? <span className="animate-spin w-3.5 h-3.5 border-2 border-orange-400/30 border-t-orange-400 rounded-full inline-block" />
-                                : <Download className="w-3.5 h-3.5" />
-                              }
-                              Raspored
+                              onClick={openNewSession}
+                              className="btn-primary text-sm py-2 px-4 flex items-center gap-1.5 shrink-0"
+                            >
+                              <Plus className="w-4 h-4" /> Novi Dan
                             </button>
-                            {session.completedCount > 0 && (
-                              <button
-                                onClick={() => handleDownloadPDF(session.sessionNumber, displayMatches)}
-                                disabled={downloadingRound === session.sessionNumber}
-                                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white rounded-lg transition-colors font-medium disabled:opacity-50"
-                                title="Preuzmi PDF izveštaj">
-                                {downloadingRound === session.sessionNumber
-                                  ? <span className="animate-spin w-3.5 h-3.5 border-2 border-slate-400/30 border-t-slate-300 rounded-full inline-block" />
-                                  : <Download className="w-3.5 h-3.5" />
-                                }
-                                Rezultati PDF
-                              </button>
-                            )}
-                            {canEdit && isOpen && (
-                              <button
-                                onClick={() => handleCloseSession(session.id)}
-                                disabled={closingSession === session.id}
-                                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white rounded-lg transition-colors font-medium disabled:opacity-50"
-                                title="Zatvori sesiju">
-                                {closingSession === session.id
-                                  ? <span className="animate-spin w-3 h-3 border-2 border-slate-400/30 border-t-slate-300 rounded-full inline-block" />
-                                  : <Lock className="w-3.5 h-3.5" />
-                                }
-                                Zatvori
-                              </button>
-                            )}
-                            {canEdit && (
-                              <button
-                                onClick={() => handleDeleteSession(session.id)}
-                                disabled={deletingSession === session.id}
-                                className="ml-auto p-2 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors flex items-center justify-center disabled:opacity-50"
-                                title="Obriši sesiju">
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-
-                          {/* Progress bar */}
-                          {session.matchCount > 0 && (
-                            <div className="mt-2.5 h-1 bg-slate-700 rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-green-500/70 rounded-full transition-all duration-500"
-                                style={{ width: `${(session.completedCount / session.matchCount) * 100}%` }}
-                              />
-                            </div>
                           )}
                         </div>
+                        {/* Global progress bar */}
+                        <div className="h-2 rounded-full overflow-hidden progress-track">
+                          <div
+                            className="h-full rounded-full transition-all duration-1000 ease-out"
+                            style={{
+                              width: `${pct}%`,
+                              background: pct === 100
+                                ? 'linear-gradient(90deg,#22c55e,#4ade80)'
+                                : 'linear-gradient(90deg,#f97316,#fb923c)',
+                            }}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between mt-1.5 flex-wrap gap-1">
+                          <div className="flex items-center gap-3">
+                            {activeSession && (
+                              <span className="flex items-center gap-1.5 text-[11px] text-orange-400">
+                                <span className="w-2 h-2 rounded-full bg-orange-400 inline-block animate-pulse" />
+                                1 aktivna
+                              </span>
+                            )}
+                            {closedSessions.length > 0 && (
+                              <span className="text-[11px] text-slate-500">{closedSessions.length} završenih</span>
+                            )}
+                            <span className="text-[11px] text-slate-600">· {sessions.length} ukupno</span>
+                          </div>
+                          <span
+                            className="text-[11px] font-bold tabular-nums"
+                            style={{ color: pct === 100 ? '#4ade80' : '#fb923c' }}
+                          >
+                            {pct}%
+                          </span>
+                        </div>
+                      </div>
 
-                        {/* Match list — expanded */}
-                        {isExpanded && displayMatches.length > 0 && (
-                          <div className="divide-y divide-slate-700/30">
-                            {displayMatches.map((m: any, idx: number) => {
-                              const completed = m.status === 'completed';
-                              const homeWon   = completed && m.homeSets > m.awaySets;
-                              const awayWon   = completed && m.awaySets > m.homeSets;
-                              const isDraw    = completed && m.homeSets === m.awaySets;
-                              const rowClass  = completed && !homeWon && !awayWon ? 'result-draw' : '';
+                      {/* ── ACTIVE SESSION HERO ────────────────────────────── */}
+                      {activeSession && (() => {
+                        const sm = fixtures.filter((m: any) => m.sessionId === activeSession.id);
+                        const pendingMs = sm.filter((m: any) => m.status !== 'completed');
+                        const doneCount = sm.filter((m: any) => m.status === 'completed').length;
+                        const sPct = activeSession.matchCount > 0
+                          ? Math.round((doneCount / activeSession.matchCount) * 100) : 0;
+                        return (
+                          <div
+                            className="rounded-2xl overflow-hidden"
+                            style={{
+                              border: '1px solid rgba(249,115,22,0.30)',
+                              boxShadow: '0 0 0 1px rgba(249,115,22,0.06), 0 4px 24px rgba(249,115,22,0.07)',
+                              backgroundColor: 'var(--bg-card)',
+                            }}
+                          >
+                            {/* Hero header */}
+                            <div
+                              className="px-4 pt-4 pb-3"
+                              style={{
+                                background: 'linear-gradient(135deg,rgba(249,115,22,0.07) 0%,transparent 55%)',
+                                borderBottom: '1px solid rgba(249,115,22,0.14)',
+                              }}
+                            >
+                              <div className="flex items-start gap-3">
+                                {/* Number badge with live ping */}
+                                <div className="relative shrink-0 mt-0.5">
+                                  <div className="w-10 h-10 rounded-xl bg-orange-500/15 border border-orange-500/25 flex items-center justify-center">
+                                    <span className="text-base font-bold text-orange-400">{activeSession.sessionNumber}</span>
+                                  </div>
+                                  <span className="absolute -top-1 -right-1 flex">
+                                    <span className="relative w-3 h-3 rounded-full bg-orange-500 border-2 border-[var(--bg-card)]">
+                                      <span className="absolute inset-0 rounded-full bg-orange-400 animate-ping opacity-70" />
+                                    </span>
+                                  </span>
+                                </div>
+
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <h3 className="text-base font-bold text-white leading-tight">
+                                      Ligaški Dan {activeSession.sessionNumber}
+                                    </h3>
+                                    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 bg-orange-500/15 text-orange-400 border border-orange-500/25 rounded-full font-semibold uppercase tracking-wider">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-orange-400" />
+                                      Aktivan
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-3 mt-1 flex-wrap">
+                                    <span className="flex items-center gap-1 text-xs text-slate-400">
+                                      <Users className="w-3 h-3 text-slate-500 shrink-0" />
+                                      {activeSession.presentPlayerIds?.length ?? 0} igrača
+                                    </span>
+                                    <span className="flex items-center gap-1 text-xs text-slate-400">
+                                      <Target className="w-3 h-3 text-slate-500 shrink-0" />
+                                      {doneCount}/{activeSession.matchCount} odigrano
+                                    </span>
+                                    {activeSession.sessionDate && (
+                                      <span className="flex items-center gap-1 text-xs text-slate-400">
+                                        <Calendar className="w-3 h-3 text-slate-500 shrink-0" />
+                                        {new Date(activeSession.sessionDate).toLocaleDateString('sr-RS')}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {canEdit && (
+                                  <button
+                                    onClick={() => handleDeleteSession(activeSession.id)}
+                                    disabled={deletingSession === activeSession.id}
+                                    className="p-2 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors shrink-0 disabled:opacity-50"
+                                    title="Obriši sesiju"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Session progress bar */}
+                              {activeSession.matchCount > 0 && (
+                                <div className="mt-3">
+                                  <div className="h-1.5 rounded-full overflow-hidden progress-track">
+                                    <div
+                                      className="h-full bg-orange-500/60 rounded-full transition-all duration-700"
+                                      style={{ width: `${sPct}%` }}
+                                    />
+                                  </div>
+                                  <div className="flex items-center justify-between mt-1">
+                                    <span className="text-[10px] text-slate-500">{pendingMs.length} preostalih</span>
+                                    <span className="text-[10px] font-semibold text-orange-400">{sPct}%</span>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Action buttons — desktop only; mobile uses sticky bottom bar */}
+                              {canEdit && (
+                                <div
+                                  className="hidden lg:flex items-center gap-2 mt-3 flex-wrap"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <button
+                                    onClick={() => handleDownloadScoresheet(activeSession, sm)}
+                                    disabled={downloadingScoresheet === activeSession.id}
+                                    className="flex items-center gap-1.5 text-sm px-3.5 py-2 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/20 rounded-xl transition-all font-medium disabled:opacity-50"
+                                  >
+                                    {downloadingScoresheet === activeSession.id
+                                      ? <span className="animate-spin w-3.5 h-3.5 border-2 border-orange-400/30 border-t-orange-400 rounded-full inline-block" />
+                                      : <Download className="w-3.5 h-3.5" />
+                                    }
+                                    Raspored
+                                  </button>
+                                  {doneCount > 0 && (
+                                    <button
+                                      onClick={() => handleDownloadPDF(activeSession.sessionNumber, sm)}
+                                      disabled={downloadingRound === activeSession.sessionNumber}
+                                      className="flex items-center gap-1.5 text-sm px-3.5 py-2 bg-slate-700/60 hover:bg-slate-700 text-slate-300 border border-slate-600/40 rounded-xl transition-all font-medium disabled:opacity-50"
+                                    >
+                                      {downloadingRound === activeSession.sessionNumber
+                                        ? <span className="animate-spin w-3.5 h-3.5 border-2 border-slate-400/30 border-t-slate-300 rounded-full inline-block" />
+                                        : <Download className="w-3.5 h-3.5" />
+                                      }
+                                      Rezultati PDF
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => openManualMatch(activeSession)}
+                                    className="flex items-center gap-1.5 text-sm px-3.5 py-2 bg-slate-700/60 hover:bg-slate-700 text-slate-300 border border-slate-600/40 rounded-xl transition-all font-medium"
+                                  >
+                                    <Plus className="w-3.5 h-3.5" /> Dodaj Meč
+                                  </button>
+                                  <button
+                                    onClick={() => handleCloseSession(activeSession.id)}
+                                    disabled={closingSession === activeSession.id}
+                                    className="flex items-center gap-1.5 text-sm px-3.5 py-2 bg-slate-700/60 hover:bg-red-500/10 text-slate-400 hover:text-red-400 border border-slate-600/40 hover:border-red-500/25 rounded-xl transition-all font-medium disabled:opacity-50 ml-auto"
+                                  >
+                                    {closingSession === activeSession.id
+                                      ? <span className="animate-spin w-3.5 h-3.5 border-2 border-slate-400/30 border-t-slate-400 rounded-full inline-block" />
+                                      : <Lock className="w-3.5 h-3.5" />
+                                    }
+                                    Zatvori Sesiju
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Match list — always expanded for active session */}
+                            {sm.length > 0 ? (
+                              <>
+                                {pendingMs.length > 0 && (
+                                  <div
+                                    className="px-4 py-2 flex items-center gap-2"
+                                    style={{ borderBottom: '1px solid rgba(249,115,22,0.08)' }}
+                                  >
+                                    <Zap className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                                    <span className="text-xs font-semibold text-orange-400 uppercase tracking-wide">
+                                      Naredni mečevi · {pendingMs.length} preostalih
+                                    </span>
+                                  </div>
+                                )}
+                                <div className="divide-y divide-slate-700/30">
+                                  {sm.map((m: any, idx: number) => {
+                                    const completed = m.status === 'completed';
+                                    const homeWon   = completed && m.homeSets > m.awaySets;
+                                    const awayWon   = completed && m.awaySets > m.homeSets;
+                                    const isDraw    = completed && m.homeSets === m.awaySets;
+                                    return (
+                                      <div
+                                        key={m.id}
+                                        className={`flex items-center px-3 sm:px-4 py-3 gap-2 transition-colors ${
+                                          completed ? 'opacity-55' : 'hover:bg-orange-500/[0.025]'
+                                        }`}
+                                      >
+                                        <span className="text-[10px] text-slate-700 w-4 shrink-0 tabular-nums text-center">{idx + 1}</span>
+                                        <div className="flex-1 flex items-center justify-end gap-1 min-w-0">
+                                          {homeWon && <Zap className="w-3 h-3 text-green-400 shrink-0" />}
+                                          <span className={`text-sm font-medium text-right truncate ${
+                                            homeWon ? 'text-green-400' : awayWon ? 'text-slate-500' : 'text-white'
+                                          }`}>{m.homePlayer?.fullName}</span>
+                                        </div>
+                                        <div className="w-14 text-center shrink-0">
+                                          {completed ? (
+                                            <span className={`text-sm font-bold tabular-nums px-1.5 py-0.5 rounded-lg ${
+                                              isDraw ? 'text-yellow-400 bg-yellow-500/10' : homeWon ? 'text-green-400 bg-green-500/10' : 'text-red-400 bg-red-500/10'
+                                            }`}>{m.homeSets}:{m.awaySets}</span>
+                                          ) : (
+                                            <span className="text-[11px] text-slate-600 font-bold tracking-wider">vs</span>
+                                          )}
+                                        </div>
+                                        <div className="flex-1 flex items-center gap-1 min-w-0">
+                                          {awayWon && <Zap className="w-3 h-3 text-green-400 shrink-0" />}
+                                          <span className={`text-sm font-medium truncate ${
+                                            awayWon ? 'text-green-400' : homeWon ? 'text-slate-500' : 'text-white'
+                                          }`}>{m.awayPlayer?.fullName}</span>
+                                        </div>
+                                        <div className="flex items-center gap-1 shrink-0">
+                                          {m.isWalkover && completed && (
+                                            <span className="text-[10px] px-1.5 py-0.5 bg-red-500/15 text-red-400 rounded font-bold">WO</span>
+                                          )}
+                                          {canEdit && !completed && (
+                                            <>
+                                              <button
+                                                onClick={() => { setEditMatch(m); setMatchScores({ home: 0, away: 0 }); }}
+                                                className="text-xs px-3 py-1.5 bg-orange-500/15 text-orange-400 hover:bg-orange-500/25 rounded-lg transition-colors font-semibold touch-target"
+                                              >
+                                                Unesi
+                                              </button>
+                                              <button
+                                                onClick={() => { setWalkoverMatch(m); setWalkoverId(''); }}
+                                                className="p-2 text-slate-600 hover:text-red-400 rounded-lg transition-colors touch-target flex items-center justify-center"
+                                                title="Valkover"
+                                              >
+                                                <Ban className="w-3.5 h-3.5" />
+                                              </button>
+                                            </>
+                                          )}
+                                          {canEdit && completed && !m.isWalkover && (
+                                            <button
+                                              onClick={() => { setEditMatch(m); setMatchScores({ home: m.homeSets, away: m.awaySets }); }}
+                                              className="text-[11px] px-2 py-1 text-slate-600 hover:text-slate-300 rounded-lg transition-colors"
+                                            >
+                                              Ispravi
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                                {canEdit && (
+                                  <div className="px-4 py-3" style={{ borderTop: '1px solid rgba(249,115,22,0.08)' }}>
+                                    <button
+                                      onClick={() => openManualMatch(activeSession)}
+                                      className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-700/60 transition-colors font-medium w-full justify-center border border-dashed border-slate-700 hover:border-slate-500"
+                                    >
+                                      <Plus className="w-3.5 h-3.5" /> Dodaj Meč Ručno
+                                    </button>
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <div className="px-4 py-6 text-center text-xs text-slate-500">
+                                Mečevi se učitavaju — klikni "Zatvori" pa ponovo otvori sesiju da ih vidiš.
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                      {/* ── TIMELINE: closed sessions ───────────────────────── */}
+                      {closedSessions.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-widest px-1 mb-2 text-slate-500">
+                            Prethodne sesije ({closedSessions.length})
+                          </p>
+                          <div className="card overflow-hidden">
+                            {closedSessions.map((session: any, sIdx: number) => {
+                              const isExp  = expandedSessions.has(session.id);
+                              const sm2    = fixtures.filter((m: any) => m.sessionId === session.id);
+                              const done   = session.completedCount ?? sm2.filter((m: any) => m.status === 'completed').length;
+                              const total  = session.matchCount ?? sm2.length;
+                              const full   = total > 0 && done === total;
+                              const rowPct = total > 0 ? (done / total) * 100 : 0;
+
                               return (
-                                <div key={m.id} className={`flex items-center px-3 sm:px-4 py-3 gap-2 transition-colors hover:bg-slate-800/30 ${rowClass}`}>
-                                  <span className="text-[10px] text-slate-700 w-4 shrink-0 select-none tabular-nums text-center">{idx + 1}</span>
-                                  {/* Home */}
-                                  <div className="flex-1 flex items-center justify-end gap-1 min-w-0">
-                                    {homeWon && <Zap className="w-3 h-3 text-green-400 shrink-0" />}
-                                    <span className={`text-sm text-right font-medium truncate ${
-                                      homeWon ? 'text-green-400' : awayWon ? 'text-slate-500' : 'text-white'
-                                    }`}>{m.homePlayer?.fullName}</span>
+                                <div key={session.id} className={sIdx > 0 ? 'border-t border-slate-700/40' : ''}>
+                                  {/* Compact timeline row */}
+                                  <div
+                                    className="flex items-center gap-3 px-4 py-3 cursor-pointer select-none group transition-colors hover:bg-slate-800/25"
+                                    onClick={() => toggleExpanded(session.id)}
+                                  >
+                                    <div className={`w-2 h-2 rounded-full shrink-0 ${full ? 'bg-green-400' : 'bg-slate-500'}`} />
+                                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
+                                      full ? 'bg-green-500/10 text-green-400' : 'bg-slate-700/60 text-slate-400'
+                                    }`}>
+                                      {session.sessionNumber}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <span className="text-sm font-medium text-white">Ligaški Dan {session.sessionNumber}</span>
+                                      {session.sessionDate && (
+                                        <span className="text-[11px] text-slate-500 ml-2">
+                                          {new Date(session.sessionDate).toLocaleDateString('sr-RS')}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-2.5 shrink-0">
+                                      <span className={`hidden sm:inline text-xs font-medium ${full ? 'text-green-400' : 'text-slate-500'}`}>
+                                        {full ? 'Završena' : 'Zatvorena'}
+                                      </span>
+                                      <span className="text-xs text-slate-500 tabular-nums">{done}/{total}</span>
+                                      <div className="w-14 h-1.5 rounded-full overflow-hidden hidden sm:block progress-track">
+                                        <div
+                                          className={`h-full rounded-full transition-all duration-500 ${full ? 'bg-green-500/60' : 'bg-slate-500/50'}`}
+                                          style={{ width: `${rowPct}%` }}
+                                        />
+                                      </div>
+                                      <ChevronDown className={`w-4 h-4 text-slate-600 group-hover:text-slate-400 transition-transform duration-200 ${isExp ? 'rotate-180' : ''}`} />
+                                    </div>
                                   </div>
-                                  {/* Score */}
-                                  <div className="w-12 text-center shrink-0">
-                                    {completed ? (
-                                      <span className={`text-sm font-bold tabular-nums px-1.5 py-0.5 rounded ${
-                                        isDraw ? 'text-yellow-400' : homeWon ? 'text-green-400' : 'text-red-400'
-                                      }`}>{m.homeSets}:{m.awaySets}</span>
-                                    ) : (
-                                      <span className="text-xs text-slate-600 font-medium">vs</span>
-                                    )}
-                                  </div>
-                                  {/* Away */}
-                                  <div className="flex-1 flex items-center gap-1 min-w-0">
-                                    {awayWon && <Zap className="w-3 h-3 text-green-400 shrink-0" />}
-                                    <span className={`text-sm font-medium truncate ${
-                                      awayWon ? 'text-green-400' : homeWon ? 'text-slate-500' : 'text-white'
-                                    }`}>{m.awayPlayer?.fullName}</span>
-                                  </div>
-                                  {/* Actions */}
-                                  <div className="flex items-center gap-1 shrink-0">
-                                    {m.isWalkover && completed && (
-                                      <span className="text-[10px] px-1.5 py-0.5 bg-red-500/15 text-red-400 rounded font-bold">WO</span>
-                                    )}
-                                    {canEdit && !completed && isOpen && (
-                                      <>
+
+                                  {/* Accordion expanded content */}
+                                  {isExp && (
+                                    <div className="border-t border-slate-700/40 bg-slate-900/20 animate-fade-in">
+                                      {/* Actions */}
+                                      <div
+                                        className="flex items-center gap-1.5 px-4 py-2.5 flex-wrap"
+                                        style={{ borderBottom: sm2.length > 0 ? '1px solid rgba(51,65,85,0.4)' : undefined }}
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
                                         <button
-                                          onClick={() => { setEditMatch(m); setMatchScores({ home: 0, away: 0 }); }}
-                                          className="text-xs px-2.5 py-1.5 bg-orange-500/15 text-orange-400 hover:bg-orange-500/25 rounded-lg transition-colors font-medium touch-target">
-                                          Unesi
+                                          onClick={() => handleDownloadScoresheet(session, sm2)}
+                                          disabled={downloadingScoresheet === session.id}
+                                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 rounded-lg transition-colors font-medium disabled:opacity-50"
+                                        >
+                                          {downloadingScoresheet === session.id
+                                            ? <span className="animate-spin w-3 h-3 border-2 border-orange-400/30 border-t-orange-400 rounded-full inline-block" />
+                                            : <Download className="w-3.5 h-3.5" />
+                                          }
+                                          Raspored
                                         </button>
-                                        <button
-                                          onClick={() => { setWalkoverMatch(m); setWalkoverId(''); }}
-                                          className="p-2 text-slate-600 hover:text-red-400 rounded-lg transition-colors touch-target flex items-center justify-center"
-                                          title="Valkover">
-                                          <Ban className="w-3.5 h-3.5" />
-                                        </button>
-                                      </>
-                                    )}
-                                    {canEdit && completed && !m.isWalkover && (
-                                      <button
-                                        onClick={() => { setEditMatch(m); setMatchScores({ home: m.homeSets, away: m.awaySets }); }}
-                                        className="text-[11px] px-2 py-1 text-slate-600 hover:text-slate-300 rounded-lg transition-colors">
-                                        Ispravi
-                                      </button>
-                                    )}
-                                  </div>
+                                        {done > 0 && (
+                                          <button
+                                            onClick={() => handleDownloadPDF(session.sessionNumber, sm2)}
+                                            disabled={downloadingRound === session.sessionNumber}
+                                            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors font-medium disabled:opacity-50"
+                                          >
+                                            {downloadingRound === session.sessionNumber
+                                              ? <span className="animate-spin w-3 h-3 border-2 border-slate-400/30 border-t-slate-300 rounded-full inline-block" />
+                                              : <Download className="w-3.5 h-3.5" />
+                                            }
+                                            Rezultati PDF
+                                          </button>
+                                        )}
+                                        {canEdit && (
+                                          <button
+                                            onClick={() => handleDeleteSession(session.id)}
+                                            disabled={deletingSession === session.id}
+                                            className="ml-auto p-2 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50"
+                                            title="Obriši sesiju"
+                                          >
+                                            {deletingSession === session.id
+                                              ? <span className="animate-spin w-3.5 h-3.5 border-2 border-slate-600/30 border-t-slate-500 rounded-full inline-block" />
+                                              : <Trash2 className="w-3.5 h-3.5" />
+                                            }
+                                          </button>
+                                        )}
+                                      </div>
+                                      {/* Matches */}
+                                      {sm2.length > 0 ? (
+                                        <div className="divide-y divide-slate-700/20">
+                                          {sm2.map((m: any, idx: number) => {
+                                            const completed = m.status === 'completed';
+                                            const homeWon   = completed && m.homeSets > m.awaySets;
+                                            const awayWon   = completed && m.awaySets > m.homeSets;
+                                            const isDraw    = completed && m.homeSets === m.awaySets;
+                                            return (
+                                              <div key={m.id} className="flex items-center px-4 py-2.5 gap-2 hover:bg-slate-800/20 transition-colors">
+                                                <span className="text-[10px] text-slate-700 w-4 shrink-0 tabular-nums text-center">{idx + 1}</span>
+                                                <div className="flex-1 flex items-center justify-end gap-1 min-w-0">
+                                                  {homeWon && <Zap className="w-3 h-3 text-green-400 shrink-0" />}
+                                                  <span className={`text-sm font-medium text-right truncate ${
+                                                    homeWon ? 'text-green-400' : awayWon ? 'text-slate-500' : 'text-slate-200'
+                                                  }`}>{m.homePlayer?.fullName}</span>
+                                                </div>
+                                                <div className="w-14 text-center shrink-0">
+                                                  {completed ? (
+                                                    <span className={`text-sm font-bold tabular-nums px-1.5 py-0.5 rounded ${
+                                                      isDraw ? 'text-yellow-400' : homeWon ? 'text-green-400' : 'text-red-400'
+                                                    }`}>{m.homeSets}:{m.awaySets}</span>
+                                                  ) : (
+                                                    <span className="text-xs text-slate-600 font-medium">vs</span>
+                                                  )}
+                                                </div>
+                                                <div className="flex-1 flex items-center gap-1 min-w-0">
+                                                  {awayWon && <Zap className="w-3 h-3 text-green-400 shrink-0" />}
+                                                  <span className={`text-sm font-medium truncate ${
+                                                    awayWon ? 'text-green-400' : homeWon ? 'text-slate-500' : 'text-slate-200'
+                                                  }`}>{m.awayPlayer?.fullName}</span>
+                                                </div>
+                                                <div className="flex items-center gap-1 shrink-0">
+                                                  {m.isWalkover && completed && (
+                                                    <span className="text-[10px] px-1.5 py-0.5 bg-red-500/15 text-red-400 rounded font-bold">WO</span>
+                                                  )}
+                                                  {canEdit && completed && !m.isWalkover && (
+                                                    <button
+                                                      onClick={() => { setEditMatch(m); setMatchScores({ home: m.homeSets, away: m.awaySets }); }}
+                                                      className="text-[11px] px-2 py-1 text-slate-600 hover:text-slate-300 rounded-lg transition-colors"
+                                                    >
+                                                      Ispravi
+                                                    </button>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      ) : (
+                                        <div className="px-4 py-4 text-center text-xs text-slate-500">Nema mečeva za ovu sesiju.</div>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })}
                           </div>
-                        )}
-                        {isExpanded && displayMatches.length === 0 && (
-                          <div className="px-4 py-6 text-center text-xs text-slate-500">
-                            Mečevi se učitavaju — klikni "Zatvori" pa ponovo otvori sesiju da ih vidiš.
-                          </div>
-                        )}
-
-                        {/* Add manual match button — only for open sessions */}
-                        {isExpanded && canEdit && isOpen && (
-                          <div className="px-4 py-2.5 border-t border-slate-700/40">
-                            <button
-                              onClick={() => openManualMatch(session)}
-                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700 transition-colors font-medium w-full justify-center border border-dashed border-slate-700 hover:border-slate-500"
-                            >
-                              <Plus className="w-3.5 h-3.5" /> Dodaj Meč Ručno
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </>
             ) : (
               /* ── LEGACY round display (old data) ─────────────────── */
@@ -1223,7 +1713,7 @@ export default function LeagueDetailPage() {
                               )}
                             </div>
                           )}
-                          <div className="mt-2.5 h-1 bg-slate-700 rounded-full overflow-hidden">
+                          <div className="mt-2.5 h-1 rounded-full overflow-hidden progress-track">
                             <div className="h-full bg-green-500/70 rounded-full transition-all duration-500" style={{ width: `${(completedCount / matches.length) * 100}%` }} />
                           </div>
                           {/* Substitution summary for this evening */}
@@ -1496,173 +1986,281 @@ export default function LeagueDetailPage() {
           </div>
         )}
 
-        {/* ══════════════════ IGRAČI ══════════════════════════ */}
-        {tab === 'igraci' && (
-          <div className="animate-fade-in-up space-y-4">
+        {/* ══════════════════ IGRAČI — DIRECTORY ══════════════════ */}
+        {tab === 'igraci' && (() => {
+          // ── helpers ─────────────────────────────────────────────
+          const getForm = (playerId: string): ('W' | 'L' | 'D')[] => {
+            const done = fixtures
+              .filter((m: any) => m.status === 'completed' && (m.homePlayerId === playerId || m.awayPlayerId === playerId))
+              .sort((a: any, b: any) => new Date(b.updatedAt ?? b.createdAt).getTime() - new Date(a.updatedAt ?? a.createdAt).getTime())
+              .slice(0, 5);
+            return done.map((m: any) => {
+              const isHome = m.homePlayerId === playerId;
+              const hs = m.homeSets ?? 0; const as_ = m.awaySets ?? 0;
+              if (hs === as_) return 'D';
+              return (isHome ? hs > as_ : as_ > hs) ? 'W' : 'L';
+            });
+          };
+          const formDot = (r: 'W' | 'L' | 'D') =>
+            r === 'W' ? 'bg-green-500' : r === 'L' ? 'bg-red-500' : 'bg-slate-500';
 
-            {/* Bulk add */}
-            {canEdit && (
-              <div className="card p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                    <Plus className="w-4 h-4 text-orange-400" /> Brzo dodaj igrače
-                  </h3>
-                  <span className="text-xs text-slate-500">jedno ime po redu, ili razdvojeno zarezom</span>
+          // parsed preview
+          const parsedNames = bulkText.trim()
+            ? bulkText.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean)
+            : [];
+          const registeredNames = new Set(lPlayers.map((lp: any) => lp.player?.fullName?.toLowerCase()));
+          const duplicateNames  = new Set(parsedNames.filter((n) => registeredNames.has(n.toLowerCase())));
+
+          // filtered + sorted
+          const filteredPlayers = lPlayers
+            .filter((lp: any) => lp.player?.fullName?.toLowerCase().includes(playerSearch.toLowerCase()))
+            .sort((a: any, b: any) => {
+              if (playerSort === 'name') return (a.player?.fullName ?? '').localeCompare(b.player?.fullName ?? '');
+              const sa = standings.find((s: any) => s.player?.id === a.playerId);
+              const sb = standings.find((s: any) => s.player?.id === b.playerId);
+              return (sb?.points ?? 0) - (sa?.points ?? 0);
+            });
+
+          return (
+            <div className="animate-fade-in-up space-y-3">
+
+              {/* ── HEADER ROW ──────────────────────────────────── */}
+              <div className="flex items-center gap-2.5">
+                {/* Title + count */}
+                <div className="flex items-center gap-2 shrink-0">
+                  <h3 className="font-bold text-white text-base">Igrači</h3>
+                  <span className="text-xs font-semibold text-slate-500 bg-slate-700/60 px-1.5 py-0.5 rounded-full tabular-nums">{lPlayers.length}</span>
                 </div>
-                <textarea
-                  ref={bulkRef}
-                  value={bulkText}
-                  onChange={(e) => setBulkText(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleBulkAdd(); }}
-                  placeholder={'Marko Petrović\nNikola Jovanović\nStefan Ilić'}
-                  rows={3}
-                  className="input-field resize-none text-sm font-mono leading-relaxed"
-                />
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-xs text-slate-500">
-                    {bulkText.trim()
-                      ? `${bulkText.split(/[\n,]+/).filter((s) => s.trim()).length} igrač(a)`
-                      : 'Ctrl+Enter za brzo dodavanje'}
-                  </div>
+
+                {/* Search */}
+                <div className="flex items-center gap-2 input-field px-2.5 py-2 flex-1 min-w-0">
+                  <Search className="w-3.5 h-3.5 text-orange-400/60 shrink-0" />
+                  <input
+                    type="text"
+                    value={playerSearch}
+                    onChange={(e) => setPlayerSearch(e.target.value)}
+                    placeholder="Pretraži..."
+                    className="flex-1 bg-transparent text-sm outline-none text-white placeholder-slate-500 min-w-0"
+                  />
+                  {playerSearch && (
+                    <button onClick={() => setPlayerSearch('')} className="text-slate-500 hover:text-white transition-colors shrink-0">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Add toggle */}
+                {canEdit && (
                   <button
-                    onClick={handleBulkAdd}
-                    disabled={!bulkText.trim() || bulkAdding}
-                    className="btn-primary text-sm py-2 disabled:opacity-50"
+                    onClick={() => setAddPanelOpen(!addPanelOpen)}
+                    className={`flex items-center gap-1.5 text-sm px-3 py-2 rounded-xl font-medium transition-all shrink-0 active:scale-95 ${addPanelOpen ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/25' : 'btn-primary'}`}
                   >
-                    {bulkAdding
-                      ? <><span className="animate-spin inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full mr-1.5" />Dodavanje...</>
-                      : <><Plus className="w-4 h-4" />Dodaj</>
-                    }
+                    <Plus className="w-4 h-4" />
+                    <span className="hidden sm:inline">Dodaj</span>
+                    {addPanelOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                   </button>
-                </div>
-
-                {/* Feedback */}
-                {bulkFeedback && (
-                  <div className="flex items-center gap-2 p-2.5 bg-green-500/10 border border-green-500/20 rounded-lg animate-fade-in-up">
-                    <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
-                    <span className="text-xs text-green-300">
-                      {bulkFeedback.added > 0 && `${bulkFeedback.added} dodato`}
-                      {bulkFeedback.created > 0 && ` · ${bulkFeedback.created} kreiran(o)`}
-                      {bulkFeedback.skipped > 0 && ` · ${bulkFeedback.skipped} preskočen(o)`}
-                    </span>
-                  </div>
-                )}
-
-                {/* Quick pick from existing */}
-                {availablePlayers.length > 0 && (
-                  <div>
-                    <p className="text-[11px] text-slate-500 mb-2 uppercase tracking-wide font-semibold">Postojeći igrači kluba</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {availablePlayers.map((p: any) => (
-                        <button
-                          key={p.id}
-                          onClick={() => addPlayer(p.id)}
-                          className="flex items-center gap-1 text-xs px-2.5 py-1.5 bg-slate-700 hover:bg-orange-500/20 hover:text-orange-300 text-slate-300 rounded-lg transition-all active:scale-95"
-                        >
-                          <Plus className="w-3 h-3" />{p.fullName}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                 )}
               </div>
-            )}
 
-            {/* Registered players */}
-            <div className="card overflow-hidden">
-              <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between gap-3">
-                <h3 className="font-semibold text-white text-sm flex items-center gap-2">
-                  <Users className="w-4 h-4 text-slate-400" /> Igrači u ligi
-                  <span className="text-xs font-normal text-slate-500">({lPlayers.length})</span>
-                </h3>
-                {canEdit && selectedPlayerIds.size > 0 && (
+              {/* ── COLLAPSIBLE ADD PANEL ───────────────────────── */}
+              {canEdit && addPanelOpen && (
+                <div className="card p-4 space-y-3.5 animate-slide-up">
+                  <textarea
+                    ref={bulkRef}
+                    value={bulkText}
+                    onChange={(e) => setBulkText(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleBulkAdd(); }}
+                    placeholder={'Unesi imena (jedno po redu ili razdvojeno zarezom)\n\nMarko Petrović\nNikola Jovanović, Stefan Ilić'}
+                    rows={3}
+                    autoFocus
+                    className="input-field resize-none text-sm leading-relaxed"
+                  />
+
+                  {/* Name preview pills */}
+                  {parsedNames.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {parsedNames.map((name, i) => {
+                        const isDup = duplicateNames.has(name.toLowerCase());
+                        return (
+                          <span key={i} className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-medium ${
+                            isDup ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' : 'bg-orange-500/10 text-orange-300 border border-orange-500/20'
+                          }`}>
+                            {isDup && <span className="text-[10px]">⚠</span>}
+                            {name}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {parsedNames.length > 0 && duplicateNames.size > 0 && (
+                    <p className="text-[11px] text-amber-400/70 -mt-1">{duplicateNames.size} igrač(a) već dodat — biće preskočen(o)</p>
+                  )}
+
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs text-slate-500">
+                      {parsedNames.length > 0 ? `${parsedNames.length} ime(na) · Ctrl+Enter` : 'Ctrl+Enter za brzo dodavanje'}
+                    </span>
+                    <button onClick={handleBulkAdd} disabled={!bulkText.trim() || bulkAdding} className="btn-primary text-sm py-2 w-full sm:w-auto disabled:opacity-50">
+                      {bulkAdding
+                        ? <><span className="animate-spin inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full mr-1.5" />Dodavanje...</>
+                        : <><Plus className="w-4 h-4" />Dodaj igrače</>
+                      }
+                    </button>
+                  </div>
+
+                  {bulkFeedback && (
+                    <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-xl animate-fade-in-up">
+                      <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
+                      <span className="text-xs text-green-300 font-medium">
+                        {bulkFeedback.added > 0 && `${bulkFeedback.added} dodato`}
+                        {bulkFeedback.created > 0 && ` · ${bulkFeedback.created} kreiran(o)`}
+                        {bulkFeedback.skipped > 0 && ` · ${bulkFeedback.skipped} preskočen(o)`}
+                      </span>
+                    </div>
+                  )}
+
+                  {availablePlayers.length > 0 && (
+                    <div className="border-t border-slate-700/50 pt-3">
+                      <p className="text-[11px] text-slate-500 mb-2 uppercase tracking-wide font-semibold">Postojeći igrači kluba</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {availablePlayers.map((p: any) => (
+                          <button key={p.id} onClick={() => addPlayer(p.id)} className="flex items-center gap-1 text-xs px-2.5 py-1.5 bg-slate-700 hover:bg-orange-500/20 hover:text-orange-300 text-slate-300 rounded-lg transition-all active:scale-95">
+                            <Plus className="w-3 h-3" />{p.fullName}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── SORT / BULK BAR ─────────────────────────────── */}
+              {canEdit && selectedPlayerIds.size > 0 ? (
+                <div className="flex items-center justify-between gap-3 px-4 py-2.5 card bg-orange-500/[0.06] border border-orange-500/20 animate-fade-in">
+                  <span className="text-xs font-medium text-orange-300">{selectedPlayerIds.size} igrač(a) izabrano</span>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400">{selectedPlayerIds.size} izabrano</span>
-                    <button
-                      onClick={() => setSelectedPlayerIds(new Set())}
-                      className="text-xs px-2.5 py-1.5 text-slate-400 hover:text-white bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
-                    >
+                    <button onClick={() => setSelectedPlayerIds(new Set())} className="text-xs px-2.5 py-1.5 text-slate-400 hover:text-white bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors">
                       Poništi
                     </button>
-                    <button
-                      onClick={handleBulkDelete}
-                      disabled={bulkDeleting}
-                      className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 bg-red-500/15 text-red-400 hover:bg-red-500/25 rounded-lg transition-colors font-medium disabled:opacity-50"
-                    >
+                    <button onClick={handleBulkDelete} disabled={bulkDeleting} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-red-500/15 text-red-400 hover:bg-red-500/25 rounded-lg transition-colors font-medium disabled:opacity-50">
                       {bulkDeleting
                         ? <span className="animate-spin inline-block w-3 h-3 border-2 border-red-400/30 border-t-red-400 rounded-full" />
-                        : <Trash2 className="w-3.5 h-3.5" />
-                      }
-                      Ukloni izabrane
+                        : <Trash2 className="w-3.5 h-3.5" />}
+                      Ukloni iz lige
                     </button>
                   </div>
-                )}
-              </div>
-
-              {lPlayers.length === 0 ? (
-                <EmptyState
-                  icon={<Users className="w-8 h-8" />}
-                  title="Nema igrača"
-                  desc="Dodajte igrače koristeći formu iznad."
-                  small
-                />
+                </div>
               ) : (
-                <div className="divide-y divide-slate-700/40">
-                  {lPlayers.map((lp: any, idx: number) => {
-                    const standing = standings.find((s: any) => s.player?.id === lp.playerId);
+                <div className="flex items-center gap-1 bg-slate-800/50 rounded-lg p-0.5 w-fit">
+                  {(['points', 'name'] as const).map((s) => (
+                    <button key={s} onClick={() => setPlayerSort(s)} className={`text-xs px-3 py-1.5 rounded-md font-medium transition-all ${playerSort === s ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                      {s === 'points' ? 'Bodovi' : 'Ime A–Ž'}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* ── PLAYER GRID ─────────────────────────────────── */}
+              {lPlayers.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+                  <div className="w-16 h-16 rounded-2xl bg-slate-800 flex items-center justify-center mb-4">
+                    <Users className="w-8 h-8 text-slate-600" />
+                  </div>
+                  <p className="text-white font-medium mb-1.5">Nema igrača</p>
+                  <p className="text-sm text-slate-500 mb-4">Dodajte igrače koristeći dugme "Dodaj" iznad.</p>
+                  {canEdit && (
+                    <button onClick={() => setAddPanelOpen(true)} className="btn-primary text-sm py-2 px-5">
+                      <Plus className="w-4 h-4" />Dodaj igrače
+                    </button>
+                  )}
+                </div>
+              ) : filteredPlayers.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <Search className="w-6 h-6 text-slate-600 mb-2" />
+                  <p className="text-sm text-slate-400">Nema rezultata za "{playerSearch}"</p>
+                  <button onClick={() => setPlayerSearch('')} className="text-xs text-orange-400 hover:text-orange-300 mt-1.5 transition-colors">Poništi pretragu</button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {filteredPlayers.map((lp: any, idx: number) => {
+                    const standing   = standings.find((s: any) => s.player?.id === lp.playerId);
                     const isSelected = selectedPlayerIds.has(lp.playerId);
+                    const form       = getForm(lp.playerId);
+
                     return (
                       <div
                         key={lp.id}
-                        className={`flex items-center gap-3 px-4 py-3 transition-colors group cursor-pointer ${isSelected ? 'bg-red-500/[0.06]' : 'hover:bg-slate-800/40'}`}
-                        style={{ animationDelay: `${idx * 25}ms` }}
-                        onClick={canEdit ? () => toggleSelectPlayer(lp.playerId) : undefined}
+                        style={{ animationDelay: `${idx * 30}ms` }}
+                        className={`relative card p-4 flex flex-col items-center text-center gap-2.5 cursor-pointer transition-all duration-150 group select-none
+                          ${isSelected
+                            ? 'ring-2 ring-orange-500 bg-orange-500/[0.06] shadow-lg shadow-orange-500/10'
+                            : 'hover:bg-slate-800/60 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/20'}
+                        `}
+                        onClick={canEdit ? () => toggleSelectPlayer(lp.playerId) : () => setSelectedPlayer(lp)}
                       >
+                        {/* Checkbox corner */}
                         {canEdit && (
-                          <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${isSelected ? 'bg-red-500 border-red-500' : 'border-slate-600 group-hover:border-slate-400'}`}>
-                            {isSelected && <span className="text-white text-[10px] font-bold leading-none">✓</span>}
+                          <div className={`absolute top-2.5 left-2.5 w-4 h-4 rounded border-2 flex items-center justify-center transition-all duration-150
+                            ${isSelected ? 'bg-orange-500 border-orange-500' : 'border-slate-600 opacity-0 group-hover:opacity-100'}
+                          `}>
+                            {isSelected && <Check className="w-2.5 h-2.5 text-white" />}
                           </div>
                         )}
-                        <Avatar name={lp.player?.fullName} />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-white truncate">{lp.player?.fullName}</p>
-                          {standing && (
-                            <p className="text-[11px] text-slate-500 mt-0.5">
-                              {standing.played} meč · <span className="text-green-400">{standing.won}P</span> <span className="text-yellow-400">{standing.drawn}R</span> <span className="text-red-400">{standing.lost}G</span> · <span className="text-orange-400 font-semibold">{standing.points} bod.</span>
+
+                        {/* Pixel avatar */}
+                        <Avatar name={lp.player?.fullName} size="lg" />
+
+                        {/* Name + simple stats */}
+                        <div className="w-full min-w-0">
+                          <p className="text-sm font-semibold text-white leading-tight truncate">{lp.player?.fullName}</p>
+                          {standing ? (
+                            <p className="text-xs text-slate-400 mt-1">
+                              <span className="text-orange-400 font-bold">{standing.points}</span> bod.
+                              <span className="mx-1.5 text-slate-600">·</span>
+                              {standing.played} meč.
                             </p>
+                          ) : (
+                            <p className="text-xs text-slate-600 mt-1">Bez mečeva</p>
                           )}
                         </div>
-                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            onClick={() => setSelectedPlayer(lp)}
-                            className="flex items-center gap-1 text-xs px-2.5 py-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors touch-target"
-                          >
-                            Detalji <ChevronRight className="w-3 h-3" />
-                          </button>
-                          {canEdit && (
-                            <button
-                              onClick={() => removePlayer(lp.playerId)}
-                              className="p-2 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors touch-target flex items-center justify-center opacity-0 group-hover:opacity-100"
-                              title="Ukloni iz lige"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
+
+                        {/* Form dots */}
+                        <div className="flex items-center justify-center gap-1">
+                          {form.length > 0
+                            ? form.map((r, i) => (
+                                <span key={i} title={r === 'W' ? 'Pobeda' : r === 'L' ? 'Poraz' : 'Remi'}
+                                  className={`w-2 h-2 rounded-full ${formDot(r)}`}
+                                />
+                              ))
+                            : Array.from({ length: 5 }, (_, i) => (
+                                <span key={i} className="w-2 h-2 rounded-full bg-slate-700" />
+                              ))
+                          }
                         </div>
+
+                        {/* Detalji CTA */}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setSelectedPlayer(lp); }}
+                          className="w-full text-xs text-slate-400 hover:text-orange-400 font-medium py-1.5 rounded-lg hover:bg-orange-500/10 transition-all"
+                        >
+                          Detalji →
+                        </button>
                       </div>
                     );
                   })}
                 </div>
               )}
+
             </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
 
       {/* ══ MODAL: Ručno dodavanje meča ══════════════════════════ */}
       {manualMatchSession && (
-        <Modal onClose={closeManualMatch} scrollable>
-          <div className="flex items-center justify-between mb-5">
+        <Modal onClose={closeManualMatch}>
+          {/* ── Header (never scrolls) ── */}
+          <div className="flex items-center justify-between mb-4 shrink-0">
             <h3 className="font-semibold text-white flex items-center gap-2 text-sm">
               <Plus className="w-4 h-4 text-orange-400" />
               Dodaj Meč — Ligaški Dan {manualMatchSession.sessionNumber}
@@ -1672,19 +2270,14 @@ export default function LeagueDetailPage() {
             </button>
           </div>
 
-          <div className="space-y-4">
+          {/* ── Scrollable body (player selectors + validation) ── */}
+          <div className="space-y-4 overflow-y-auto overscroll-contain" style={{ maxHeight: 'min(55vh, 420px)' }}>
             {/* Home player */}
             <div>
               <label className="text-xs text-slate-400 mb-1.5 block font-medium">Domaćin</label>
               <PlayerCombobox
                 value={manualHome}
-                onChange={(pid) => {
-                  setManualHome(pid);
-                  setManualCheck(null);
-                  if (pid && manualAway && pid !== manualAway) {
-                    runManualCheck(pid, manualAway, manualMatchSession.id);
-                  }
-                }}
+                onChange={(pid) => { setManualHome(pid); setManualCheck(null); }}
                 players={lPlayers}
                 excludeId={manualAway}
                 placeholder="— Pretraži domaćina —"
@@ -1705,13 +2298,7 @@ export default function LeagueDetailPage() {
               <label className="text-xs text-slate-400 mb-1.5 block font-medium">Gost</label>
               <PlayerCombobox
                 value={manualAway}
-                onChange={(pid) => {
-                  setManualAway(pid);
-                  setManualCheck(null);
-                  if (manualHome && pid && manualHome !== pid) {
-                    runManualCheck(manualHome, pid, manualMatchSession.id);
-                  }
-                }}
+                onChange={(pid) => { setManualAway(pid); setManualCheck(null); }}
                 players={lPlayers}
                 excludeId={manualHome}
                 placeholder="— Pretraži gosta —"
@@ -1720,15 +2307,16 @@ export default function LeagueDetailPage() {
 
             {/* Validation feedback */}
             {(manualChecking || manualCheck) && (
-              <div className={`rounded-xl px-4 py-3 text-sm flex items-start gap-3 ${
+              <div className={`rounded-xl px-4 py-3 text-sm flex items-start gap-3 animate-fade-in ${
                 manualChecking ? 'bg-slate-800 border border-slate-700' :
                 manualCheck?.status === 'blocked' ? 'bg-red-500/10 border border-red-500/30' :
+                manualCheck?.status === 'error'   ? 'bg-red-500/10 border border-red-500/30' :
                 manualCheck?.status === 'second'  ? 'bg-amber-500/10 border border-amber-500/30' :
                                                     'bg-green-500/10 border border-green-500/30'
               }`}>
                 {manualChecking ? (
                   <span className="animate-spin w-4 h-4 border-2 border-slate-600 border-t-slate-300 rounded-full shrink-0 mt-0.5" />
-                ) : manualCheck?.status === 'blocked' ? (
+                ) : manualCheck?.status === 'blocked' || manualCheck?.status === 'error' ? (
                   <span className="text-red-400 text-base shrink-0">❌</span>
                 ) : manualCheck?.status === 'second' ? (
                   <span className="text-amber-400 text-base shrink-0">⚠️</span>
@@ -1736,11 +2324,17 @@ export default function LeagueDetailPage() {
                   <span className="text-green-400 text-base shrink-0">✅</span>
                 )}
                 <div>
-                  {manualChecking && <p className="text-slate-400">Provjera...</p>}
+                  {manualChecking && <p className="text-slate-400">Provera...</p>}
                   {!manualChecking && manualCheck?.status === 'blocked' && (
                     <>
                       <p className="font-semibold text-red-400">Nije moguće dodati meč</p>
                       <p className="text-xs text-red-400/70 mt-0.5">Ovi igrači su već odigrali oba predviđena meča u ligi.</p>
+                    </>
+                  )}
+                  {!manualChecking && manualCheck?.status === 'error' && (
+                    <>
+                      <p className="font-semibold text-red-400">Greška pri proveri</p>
+                      <p className="text-xs text-red-400/70 mt-0.5">{manualCheck.message}</p>
                     </>
                   )}
                   {!manualChecking && manualCheck?.status === 'second' && (
@@ -1763,29 +2357,30 @@ export default function LeagueDetailPage() {
               </div>
             )}
 
-            {/* Actions */}
-            <div className="flex gap-3 pt-1">
-              <button
-                onClick={closeManualMatch}
-                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-700 text-slate-400 hover:text-white text-sm font-medium transition-colors"
-              >
-                Otkaži
-              </button>
-              <button
-                onClick={handleAddManualMatch}
-                disabled={
-                  !manualHome || !manualAway || manualHome === manualAway ||
-                  !manualCheck || manualCheck.status === 'blocked' ||
-                  manualChecking || manualSaving
-                }
-                className="flex-1 btn-primary py-2.5 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {manualSaving
-                  ? <><span className="animate-spin inline-block w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full mr-1.5" />Dodavanje...</>
-                  : <><Plus className="w-4 h-4 mr-1" />Dodaj Meč</>
-                }
-              </button>
-            </div>
+          </div>
+
+          {/* ── Footer (always visible — never scrolls) ── */}
+          <div className="flex gap-3 pt-4 mt-1 border-t border-slate-700/40 shrink-0">
+            <button
+              onClick={closeManualMatch}
+              className="flex-1 px-4 py-2.5 rounded-xl border border-slate-700 text-slate-400 hover:text-white text-sm font-medium transition-colors"
+            >
+              Otkaži
+            </button>
+            <button
+              onClick={handleAddManualMatch}
+              disabled={
+                !manualHome || !manualAway || manualHome === manualAway ||
+                !manualCheck || manualCheck.status === 'blocked' || manualCheck.status === 'error' ||
+                manualChecking || manualSaving
+              }
+              className="flex-1 btn-primary py-2.5 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {manualSaving
+                ? <><span className="animate-spin inline-block w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full mr-1.5" />Dodavanje...</>
+                : <><Plus className="w-4 h-4 mr-1" />Dodaj Meč</>
+              }
+            </button>
           </div>
         </Modal>
       )}
@@ -1928,6 +2523,49 @@ export default function LeagueDetailPage() {
               })}
             </div>
           </div>
+
+          {/* Live match count calculation */}
+          {sessionPresent.size >= 2 && (() => {
+            const N = sessionPresent.size;
+            const M = sessionMaxPer;
+            const total = (N * M) / 2;
+            const isValid = (N * M) % 2 === 0;
+            return (
+              <div className={`mb-4 px-3.5 py-3 rounded-xl border transition-all ${
+                isValid
+                  ? 'bg-orange-500/8 border-orange-500/25'
+                  : 'bg-red-500/8 border-red-500/25'
+              }`}>
+                {isValid ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-white">
+                        {total} meč{total !== 1 ? 'a' : ''} večeras
+                      </p>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {N} igrač{N !== 1 ? 'a' : ''} · svako igra {M} meč{M !== 1 ? 'a' : ''}
+                      </p>
+                    </div>
+                    <div className="text-2xl font-bold text-orange-400 tabular-nums shrink-0">
+                      {total}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-6 h-6 rounded-full bg-red-500/20 flex items-center justify-center shrink-0">
+                      <span className="text-red-400 text-xs font-bold">!</span>
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-red-400">Neparni raspored</p>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {N} × {M} = {N * M} nije deljivo sa 2 — nije moguće ravnomerno rasporediti
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Preview */}
           <button
@@ -2159,41 +2797,135 @@ export default function LeagueDetailPage() {
       {/* ══ MODAL: Unesi Rezultat ══════════════════════════════ */}
       {editMatch && (
         <Modal onClose={() => setEditMatch(null)}>
-          <div className="flex items-center justify-between mb-5">
-            <h3 className="font-semibold text-white">
-              {editMatch.status === 'completed' ? 'Ispravi Rezultat' : 'Unesi Rezultat'}
-            </h3>
-            <button onClick={() => setEditMatch(null)} className="p-1 text-slate-400 hover:text-white rounded-lg transition-colors"><X className="w-5 h-5" /></button>
+          {/* Header */}
+          <div className="flex items-start justify-between mb-1">
+            <div>
+              <h3 className="font-bold text-white flex items-center gap-2">
+                <Target className="w-4 h-4 text-orange-400 shrink-0" />
+                {editMatch.status === 'completed' ? 'Ispravi Rezultat' : 'Unos Rezultata'}
+              </h3>
+              <p className="text-xs mt-0.5 truncate max-w-[220px]" style={{ color: 'var(--text-secondary)' }}>
+                {editMatch.homePlayer?.fullName} <span className="opacity-40">vs</span> {editMatch.awayPlayer?.fullName}
+              </p>
+            </div>
+            <button
+              onClick={() => setEditMatch(null)}
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg transition-colors shrink-0 ml-2"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
+
           {(() => {
             const max = league.setsPerMatch === 1 ? league.legsPerSet : league.setsPerMatch;
+            const homeLeading = matchScores.home > matchScores.away && (matchScores.home > 0 || matchScores.away > 0);
+            const awayLeading = matchScores.away > matchScores.home && (matchScores.home > 0 || matchScores.away > 0);
+
+            const ScoreCard = ({
+              side, label, name, score, leading,
+            }: { side: 'home' | 'away'; label: string; name: string; score: number; leading: boolean }) => (
+              <div
+                className="flex-1 flex flex-col items-center gap-3 rounded-2xl p-4 transition-all duration-200"
+                style={{
+                  backgroundColor: leading ? 'rgba(34,197,94,0.06)' : 'var(--bg-secondary)',
+                  border: leading
+                    ? '1px solid rgba(34,197,94,0.30)'
+                    : '1px solid var(--border)',
+                  boxShadow: leading ? '0 0 16px rgba(34,197,94,0.07)' : 'none',
+                }}
+              >
+                {/* Label + name */}
+                <div className="text-center">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style={{ color: 'var(--text-secondary)' }}>
+                    {label}
+                  </p>
+                  <p className="text-sm font-bold leading-tight text-white truncate max-w-[110px]">{name}</p>
+                  {leading && (
+                    <p className="text-[10px] text-green-400 font-semibold mt-0.5 animate-fade-in">● Vodi</p>
+                  )}
+                </div>
+
+                {/* Score display */}
+                <div
+                  className="w-20 h-20 rounded-2xl flex items-center justify-center"
+                  style={{
+                    backgroundColor: leading ? 'rgba(34,197,94,0.10)' : 'rgba(30,41,59,0.60)',
+                    border: leading ? '1px solid rgba(34,197,94,0.25)' : '1px solid rgba(51,65,85,0.6)',
+                  }}
+                >
+                  <span
+                    key={score}
+                    className="text-5xl font-black tabular-nums leading-none animate-score-pop"
+                    style={{ color: leading ? '#4ade80' : 'white' }}
+                  >
+                    {score}
+                  </span>
+                </div>
+
+                {/* +/- controls */}
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setMatchScores((s) => ({ ...s, [side]: Math.max(0, s[side] - 1) }))}
+                    disabled={score <= 0}
+                    className="w-10 h-10 rounded-xl flex items-center justify-center text-xl font-bold transition-all active:scale-90 disabled:opacity-25"
+                    style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+                  >
+                    −
+                  </button>
+                  <button
+                    onClick={() => setMatchScores((s) => ({ ...s, [side]: Math.min(max, s[side] + 1) }))}
+                    disabled={score >= max}
+                    className="w-10 h-10 rounded-xl flex items-center justify-center text-xl font-bold transition-all active:scale-90 disabled:opacity-25 bg-orange-500/15 text-orange-400 hover:bg-orange-500/25"
+                    style={{ border: '1px solid rgba(249,115,22,0.25)' }}
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            );
+
             return (
               <>
-                <p className="text-xs text-slate-500 text-center mb-4">Maks. {max} po igraču</p>
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="flex-1 text-center space-y-2">
-                    <p className="text-xs text-slate-400">Domaćin</p>
-                    <p className="text-sm font-semibold text-white leading-tight">{editMatch.homePlayer?.fullName}</p>
-                    <input type="number" className="input-field text-center text-lg font-bold" min={0} max={max} value={matchScores.home}
-                      onChange={(e) => setMatchScores({ ...matchScores, home: parseInt(e.target.value) || 0 })} />
+                {/* Score board */}
+                <div className="flex items-center gap-3 my-5">
+                  <ScoreCard side="home" label="Domaćin" name={editMatch.homePlayer?.fullName} score={matchScores.home} leading={homeLeading} />
+                  <div className="flex flex-col items-center gap-1 shrink-0">
+                    <span className="text-2xl font-thin text-slate-600">:</span>
+                    <span className="text-[10px] text-slate-600 font-medium">max {max}</span>
                   </div>
-                  <div className="text-slate-600 text-2xl font-light mb-1">:</div>
-                  <div className="flex-1 text-center space-y-2">
-                    <p className="text-xs text-slate-400">Gost</p>
-                    <p className="text-sm font-semibold text-white leading-tight">{editMatch.awayPlayer?.fullName}</p>
-                    <input type="number" className="input-field text-center text-lg font-bold" min={0} max={max} value={matchScores.away}
-                      onChange={(e) => setMatchScores({ ...matchScores, away: parseInt(e.target.value) || 0 })} />
-                  </div>
+                  <ScoreCard side="away" label="Gost" name={editMatch.awayPlayer?.fullName} score={matchScores.away} leading={awayLeading} />
                 </div>
+
+                {/* Error */}
                 {matchScoreError && (
-                  <p className="text-xs text-red-400 text-center mb-3 p-2 bg-red-500/10 rounded-lg">{matchScoreError}</p>
+                  <div
+                    key={matchScoreError}
+                    className="flex items-center gap-2 px-3 py-2.5 rounded-xl mb-1 animate-shake animate-fade-in text-sm"
+                    style={{ backgroundColor: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.20)', color: '#f87171' }}
+                  >
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{matchScoreError}</span>
+                  </div>
                 )}
               </>
             );
           })()}
-          <div className="flex gap-2 mt-2">
-            <button onClick={saveMatchResult} disabled={!!matchScoreError} className="btn-primary flex-1 justify-center text-sm disabled:opacity-40">Sačuvaj</button>
-            <button onClick={() => setEditMatch(null)} className="btn-secondary flex-1 justify-center text-sm">Otkaži</button>
+
+          {/* Actions */}
+          <div className="flex flex-col gap-2 mt-4">
+            <button
+              onClick={saveMatchResult}
+              disabled={!!matchScoreError}
+              className="btn-primary w-full justify-center py-3 text-sm font-semibold disabled:opacity-40 active:scale-[0.98] transition-transform"
+            >
+              <Check className="w-4 h-4" /> Sačuvaj rezultat
+            </button>
+            <button
+              onClick={() => setEditMatch(null)}
+              className="btn-secondary w-full justify-center py-2.5 text-sm"
+            >
+              Otkaži
+            </button>
           </div>
         </Modal>
       )}
@@ -2258,87 +2990,413 @@ export default function LeagueDetailPage() {
       {selectedPlayer && (() => {
         const { completed, remaining } = getPlayerMatches(selectedPlayer.playerId);
         const standing = standings.find((s: any) => s.player?.id === selectedPlayer.playerId);
+        const name     = selectedPlayer.player?.fullName ?? '';
+        const rarity   = avatarRarity(name);
+
+        /* form: last 5 completed in reverse order */
+        const recentForm = [...completed].slice(-5).reverse();
+        const formColor  = (o: string) => o === 'win' ? 'bg-green-500' : o === 'loss' ? 'bg-red-500' : 'bg-slate-500';
+
+        /* win rate bar */
+        const winPct = standing?.played ? Math.round((standing.won / standing.played) * 100) : 0;
+
+        /* open opponent modal */
+        const openOpponent = (opponentId: string) => {
+          const lp = lPlayers.find((x: any) => x.playerId === opponentId);
+          if (lp) setSelectedPlayer(lp);
+        };
+
         return (
-          <Modal onClose={() => setSelectedPlayer(null)} wide>
-            <div className="flex items-center justify-between mb-5">
-              <div className="flex items-center gap-3">
-                <Avatar name={selectedPlayer.player?.fullName} size="md" />
+          <Modal onClose={() => setSelectedPlayer(null)} wide scrollable>
+
+            {/* ── HEADER ──────────────────────────────────────── */}
+            <div className="flex items-start justify-between mb-5">
+              <div className="flex items-center gap-3.5">
+                {/* avatar */}
+                <div className={`relative w-16 h-16 rounded-2xl bg-slate-700 overflow-hidden shrink-0 ${RARITY_RING[rarity]}`}>
+                  <img
+                    src={`https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name)}`}
+                    alt={name}
+                    className="w-full h-full object-cover scale-110"
+                  />
+                  {rarity === 'legendary' && (
+                    <div className="absolute inset-0 animate-shimmer pointer-events-none" />
+                  )}
+                </div>
+
+                {/* identity */}
                 <div>
-                  <h3 className="font-bold text-white">{selectedPlayer.player?.fullName}</h3>
-                  {standing && (
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      <span className="text-orange-400 font-bold">{standing.points}</span> bod · Pozicija #{standing.position}
-                    </p>
+                  <h3 className="text-lg font-bold text-white leading-tight">{name}</h3>
+                  {selectedPlayer.player?.nickname && (
+                    <p className="text-xs text-slate-500 mt-0.5">"{selectedPlayer.player.nickname}"</p>
+                  )}
+                  {standing ? (
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                      <span className="text-xs font-bold text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded-md">
+                        {standing.points} bod.
+                      </span>
+                      <span className="text-xs text-slate-500">#{standing.position} pozicija</span>
+                      {rarity !== 'common' && (
+                        <span className={`text-[10px] font-bold tracking-widest uppercase
+                          ${rarity === 'legendary' ? 'text-yellow-400' : rarity === 'epic' ? 'text-violet-400' : 'text-blue-400'}
+                        `}>{rarity}</span>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-600 mt-1">Bez mečeva</p>
                   )}
                 </div>
               </div>
-              <button onClick={() => setSelectedPlayer(null)} className="p-1.5 text-slate-400 hover:text-white rounded-lg transition-colors"><X className="w-5 h-5" /></button>
+              <button onClick={() => setSelectedPlayer(null)} className="p-1.5 text-slate-400 hover:text-white rounded-lg transition-colors shrink-0">
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
-            {/* Stats row */}
+            {/* ── STATS 2×2 ───────────────────────────────────── */}
             {standing && (
-              <div className="grid grid-cols-4 gap-2 mb-5">
+              <div className="grid grid-cols-2 gap-2 mb-4">
                 {[
-                  { label: 'Mečevi', value: standing.played, color: 'text-white' },
-                  { label: 'Pobede',  value: standing.won,    color: 'text-green-400' },
-                  { label: 'Remiji',  value: standing.drawn,  color: 'text-yellow-400' },
-                  { label: 'Porazi',  value: standing.lost,   color: 'text-red-400' },
-                ].map(({ label, value, color }) => (
-                  <div key={label} className="bg-slate-800 rounded-xl p-3 text-center">
-                    <p className={`text-xl font-bold ${color} tabular-nums`}>{value}</p>
-                    <p className="text-[10px] text-slate-500 mt-0.5">{label}</p>
+                  { label: 'Mečevi',  value: standing.played, color: 'text-white',        bg: 'bg-slate-800',        icon: '🎯' },
+                  { label: 'Pobede',  value: standing.won,    color: 'text-green-400',    bg: 'bg-green-500/8',      icon: '🟢' },
+                  { label: 'Remiji',  value: standing.drawn,  color: 'text-slate-400',    bg: 'bg-slate-800',        icon: '⚪' },
+                  { label: 'Porazi',  value: standing.lost,   color: 'text-red-400',      bg: 'bg-red-500/8',        icon: '🔴' },
+                ].map(({ label, value, color, bg, icon }) => (
+                  <div key={label} className={`${bg} rounded-xl px-3 py-2.5 flex items-center gap-3`}>
+                    <span className="text-base leading-none">{icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wide">{label}</p>
+                      <p className={`text-xl font-bold ${color} tabular-nums leading-tight`}>{value}</p>
+                    </div>
                   </div>
                 ))}
               </div>
             )}
 
-            {/* Completed matches */}
+            {/* ── WIN RATE BAR ─────────────────────────────────── */}
+            {standing && standing.played > 0 && (
+              <div className="mb-5">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] text-slate-500 uppercase tracking-wide">Win rate</span>
+                  <span className="text-xs font-bold text-green-400">{winPct}%</span>
+                </div>
+                <div className="h-1.5 rounded-full overflow-hidden progress-track">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-green-500 to-emerald-400 transition-all duration-700"
+                    style={{ width: `${winPct}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* ── FORMA ────────────────────────────────────────── */}
+            {recentForm.length > 0 && (
+              <div className="flex items-center gap-3 mb-5">
+                <span className="text-[10px] text-slate-500 uppercase tracking-wide whitespace-nowrap">Forma</span>
+                <div className="flex items-center gap-1.5">
+                  {recentForm.map((m, i) => (
+                    <span
+                      key={i}
+                      title={m.outcome === 'win' ? 'Pobeda' : m.outcome === 'loss' ? 'Poraz' : 'Remi'}
+                      className={`w-2.5 h-2.5 rounded-full ${formColor(m.outcome)} stagger-${i + 1} animate-scale-in`}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── MATCH HISTORY ────────────────────────────────── */}
             <div className="mb-4">
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                Odigrani mečevi ({completed.length})
+              <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                Poslednji mečevi {completed.length > 0 && `(${completed.length})`}
               </p>
               {completed.length === 0 ? (
                 <p className="text-xs text-slate-600 py-2">Nema odigranih mečeva.</p>
               ) : (
-                <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
-                  {completed.map((m) => (
-                    <div key={m.matchId} className={`flex items-center gap-3 px-3 py-2 rounded-lg ${
-                      m.outcome === 'win' ? 'bg-green-500/8' : m.outcome === 'loss' ? 'bg-red-500/6' : 'bg-yellow-500/6'
-                    }`}>
-                      <span className={`text-xs font-bold w-3 ${
-                        m.outcome === 'win' ? 'text-green-400' : m.outcome === 'loss' ? 'text-red-400' : 'text-yellow-400'
-                      }`}>
-                        {m.outcome === 'win' ? 'P' : m.outcome === 'loss' ? 'G' : 'R'}
+                <div className="space-y-1 max-h-52 overflow-y-auto pr-0.5">
+                  {[...completed].reverse().map((m) => (
+                    <button
+                      key={m.matchId}
+                      onClick={() => openOpponent(m.opponentId)}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors group
+                        ${m.outcome === 'win'  ? 'hover:bg-green-500/10'  :
+                          m.outcome === 'loss' ? 'hover:bg-red-500/10'    : 'hover:bg-slate-700/50'}
+                      `}
+                    >
+                      {/* result dot */}
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${formColor(m.outcome)}`} />
+
+                      {/* opponent avatar + name */}
+                      <Avatar name={m.opponentName ?? ''} size="sm" />
+                      <span className="text-sm text-white flex-1 truncate group-hover:text-orange-300 transition-colors">
+                        {m.opponentName}
                       </span>
-                      <span className="text-sm text-white flex-1 truncate">{m.opponentName}</span>
-                      <span className={`text-sm font-bold tabular-nums ${
-                        m.outcome === 'win' ? 'text-green-400' : m.outcome === 'loss' ? 'text-red-400' : 'text-yellow-400'
-                      }`}>{m.myScore}:{m.oppScore}</span>
-                      {m.isWalkover && <span className="text-[10px] px-1 bg-red-500/15 text-red-400 rounded font-bold">WO</span>}
-                    </div>
+
+                      {/* score */}
+                      <span className={`text-sm font-bold tabular-nums shrink-0
+                        ${m.outcome === 'win' ? 'text-green-400' : m.outcome === 'loss' ? 'text-red-400' : 'text-slate-400'}
+                      `}>
+                        {m.myScore}:{m.oppScore}
+                      </span>
+                      {m.isWalkover && (
+                        <span className="text-[10px] px-1.5 py-0.5 bg-red-500/15 text-red-400 rounded-md font-bold shrink-0">WO</span>
+                      )}
+                    </button>
                   ))}
                 </div>
               )}
             </div>
 
-            {/* Remaining opponents */}
+            {/* ── PREOSTALI PROTIVNICI ──────────────────────────── */}
             <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                Preostali protivnici ({remaining.length})
+              <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                Preostali protivnici {remaining.length > 0 && `(${remaining.length})`}
               </p>
               {remaining.length === 0 ? (
-                <p className="text-xs text-green-400 py-1 flex items-center gap-1">
+                <p className="text-xs text-green-400 py-1 flex items-center gap-1.5">
                   <CheckCircle2 className="w-3.5 h-3.5" /> Svi mečevi odigrani!
                 </p>
               ) : (
                 <div className="flex flex-wrap gap-1.5">
-                  {remaining.map((name) => (
-                    <span key={name} className="text-xs px-2.5 py-1 bg-slate-700 text-slate-300 rounded-lg">{name}</span>
-                  ))}
+                  {remaining.map((oppName) => {
+                    const oppLp = lPlayers.find((x: any) => (x.player?.fullName ?? x.playerId) === oppName);
+                    return (
+                      <button
+                        key={oppName}
+                        onClick={() => oppLp && setSelectedPlayer(oppLp)}
+                        className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-xl transition-all
+                          ${oppLp ? 'bg-slate-700/80 text-slate-300 hover:bg-slate-600 hover:text-white active:scale-95' : 'bg-slate-800 text-slate-500 cursor-default'}
+                        `}
+                      >
+                        <Avatar name={oppName} size="sm" />
+                        {oppName}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
+
           </Modal>
+        );
+      })()}
+
+      {/* ══ STICKY MOBILE BOTTOM ACTION BAR ════════════════════════ */}
+      {tab === 'raspored' && isSessionMode && canEdit && activeSessionForBar && (() => {
+        const asSm = fixtures.filter((m: any) => m.sessionId === activeSessionForBar.id);
+        const doneCount = asSm.filter((m: any) => m.status === 'completed').length;
+        return (
+          <>
+            {/* ── Fixed bottom bar ── */}
+            <div
+              className={`lg:hidden fixed bottom-0 inset-x-0 z-40 transition-transform duration-200 ease-in-out ${
+                bottomBarVisible ? 'translate-y-0' : 'translate-y-full'
+              }`}
+              style={{
+                background: 'linear-gradient(to top, rgba(15,23,42,0.97) 70%, transparent)',
+                backdropFilter: 'blur(16px)',
+                WebkitBackdropFilter: 'blur(16px)',
+                borderTop: '1px solid rgba(51,65,85,0.45)',
+                paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+              }}
+            >
+              <div className="flex items-center gap-2.5 px-4 py-3">
+                {/* PRIMARY: Add match */}
+                <button
+                  onClick={() => openManualMatch(activeSessionForBar)}
+                  className="flex-1 flex items-center justify-center gap-2 h-12 rounded-xl font-semibold text-sm text-white transition-all active:scale-[0.97]"
+                  style={{
+                    background: 'linear-gradient(135deg,#f97316,#ea580c)',
+                    boxShadow: '0 4px 16px rgba(249,115,22,0.30)',
+                  }}
+                >
+                  <Plus className="w-4 h-4 shrink-0" />
+                  Dodaj Meč
+                </button>
+
+                {/* SECONDARY: Schedule PDF */}
+                <button
+                  onClick={() => handleDownloadScoresheet(activeSessionForBar, asSm)}
+                  disabled={downloadingScoresheet === activeSessionForBar.id}
+                  className="flex items-center justify-center gap-1.5 h-12 px-4 rounded-xl font-medium text-sm transition-all active:scale-[0.97] disabled:opacity-50"
+                  style={{
+                    backgroundColor: 'rgba(249,115,22,0.09)',
+                    border: '1px solid rgba(249,115,22,0.22)',
+                    color: '#fb923c',
+                  }}
+                >
+                  {downloadingScoresheet === activeSessionForBar.id
+                    ? <span className="animate-spin w-4 h-4 border-2 border-orange-400/30 border-t-orange-400 rounded-full inline-block" />
+                    : <Download className="w-4 h-4 shrink-0" />
+                  }
+                  <span className="hidden sm:inline">Raspored</span>
+                </button>
+
+                {/* MORE: bottom sheet trigger */}
+                <button
+                  onClick={() => setShowMoreSheet(true)}
+                  className="flex items-center justify-center w-12 h-12 rounded-xl transition-all active:scale-[0.97]"
+                  style={{
+                    backgroundColor: 'rgba(30,41,59,0.85)',
+                    border: '1px solid rgba(51,65,85,0.5)',
+                    color: '#94a3b8',
+                  }}
+                >
+                  <MoreHorizontal className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* ── Bottom sheet: More actions ── */}
+            {showMoreSheet && (
+              <div
+                className="lg:hidden fixed inset-0 z-50"
+                onClick={() => setShowMoreSheet(false)}
+              >
+                {/* Backdrop */}
+                <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" />
+
+                {/* Sheet */}
+                <div
+                  className="absolute inset-x-0 bottom-0 rounded-t-2xl animate-slide-up"
+                  style={{
+                    backgroundColor: 'var(--bg-card)',
+                    border: '1px solid rgba(51,65,85,0.5)',
+                    borderBottom: 'none',
+                    paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 16px)',
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Handle */}
+                  <div className="flex justify-center pt-3 pb-2">
+                    <div className="w-9 h-1 rounded-full bg-slate-600/70" />
+                  </div>
+
+                  <div className="px-4 pb-2">
+                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-3 px-1">
+                      Više akcija · Dan {activeSessionForBar.sessionNumber}
+                    </p>
+
+                    {/* Rezultati PDF — only if matches done */}
+                    {doneCount > 0 && (
+                      <button
+                        onClick={() => {
+                          setShowMoreSheet(false);
+                          handleDownloadPDF(activeSessionForBar.sessionNumber, asSm);
+                        }}
+                        disabled={downloadingRound === activeSessionForBar.sessionNumber}
+                        className="w-full flex items-center gap-3.5 px-4 py-3.5 rounded-xl mb-2 transition-all active:scale-[0.98] disabled:opacity-50"
+                        style={{ backgroundColor: 'var(--bg-secondary)' }}
+                      >
+                        <div
+                          className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+                          style={{ backgroundColor: 'rgba(100,116,139,0.15)' }}
+                        >
+                          {downloadingRound === activeSessionForBar.sessionNumber
+                            ? <span className="animate-spin w-4 h-4 border-2 border-slate-400/30 border-t-slate-300 rounded-full inline-block" />
+                            : <Download className="w-4 h-4 text-slate-300" />
+                          }
+                        </div>
+                        <div className="text-left">
+                          <span className="text-sm font-medium text-white block">Rezultati PDF</span>
+                          <span className="text-xs text-slate-500">{doneCount} odigranih mečeva</span>
+                        </div>
+                      </button>
+                    )}
+
+                    {/* Zatvori sesiju — destructive */}
+                    <button
+                      onClick={() => {
+                        setShowMoreSheet(false);
+                        setShowCloseConfirm(true);
+                      }}
+                      className="w-full flex items-center gap-3.5 px-4 py-3.5 rounded-xl transition-all active:scale-[0.98]"
+                      style={{
+                        backgroundColor: 'rgba(239,68,68,0.06)',
+                        border: '1px solid rgba(239,68,68,0.18)',
+                      }}
+                    >
+                      <div className="w-9 h-9 rounded-lg bg-red-500/15 flex items-center justify-center shrink-0">
+                        <Lock className="w-4 h-4 text-red-400" />
+                      </div>
+                      <div className="text-left">
+                        <span className="text-sm font-semibold text-red-400 block">Zatvori Sesiju</span>
+                        <span className="text-xs text-slate-500">Završi aktivni ligaški dan</span>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Close session confirmation ── */}
+            {showCloseConfirm && (
+              <div
+                className="lg:hidden fixed inset-0 z-50 flex items-end"
+                onClick={() => setShowCloseConfirm(false)}
+              >
+                <div className="absolute inset-0 bg-black/65 backdrop-blur-[2px]" />
+                <div
+                  className="relative w-full rounded-t-2xl p-5 animate-slide-up"
+                  style={{
+                    backgroundColor: 'var(--bg-card)',
+                    border: '1px solid rgba(51,65,85,0.5)',
+                    borderBottom: 'none',
+                    paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 20px)',
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Handle */}
+                  <div className="flex justify-center -mt-1 mb-4">
+                    <div className="w-9 h-1 rounded-full bg-slate-600/70" />
+                  </div>
+
+                  <div className="flex items-start gap-3.5 mb-4">
+                    <div className="w-11 h-11 rounded-full bg-red-500/15 border border-red-500/25 flex items-center justify-center shrink-0">
+                      <Lock className="w-5 h-5 text-red-400" />
+                    </div>
+                    <div>
+                      <p className="text-base font-bold text-white">Zatvori sesiju?</p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Ligaški Dan {activeSessionForBar.sessionNumber}
+                        {' · '}{doneCount}/{activeSessionForBar.matchCount} odigrano
+                      </p>
+                    </div>
+                  </div>
+
+                  <p className="text-sm text-slate-400 mb-5 leading-relaxed">
+                    Sesija se premešta u arhivu. Neodigrani mečevi ostaju u evidenciji i mogu se naknadno uneti.
+                  </p>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowCloseConfirm(false)}
+                      className="flex-1 h-12 rounded-xl font-medium text-sm text-slate-300 transition-all active:scale-[0.97]"
+                      style={{
+                        backgroundColor: 'var(--bg-secondary)',
+                        border: '1px solid rgba(51,65,85,0.5)',
+                      }}
+                    >
+                      Otkaži
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowCloseConfirm(false);
+                        handleCloseSession(activeSessionForBar.id);
+                      }}
+                      disabled={closingSession === activeSessionForBar.id}
+                      className="flex-1 h-12 rounded-xl font-semibold text-sm text-white bg-red-500 hover:bg-red-600 transition-all active:scale-[0.97] disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {closingSession === activeSessionForBar.id
+                        ? <span className="animate-spin w-4 h-4 border-2 border-white/30 border-t-white rounded-full inline-block" />
+                        : <Lock className="w-4 h-4" />
+                      }
+                      Zatvori
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         );
       })()}
 
