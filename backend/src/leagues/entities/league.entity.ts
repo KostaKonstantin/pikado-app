@@ -51,9 +51,13 @@ export class League {
   @Column({ type: 'enum', enum: LeagueStatus, default: LeagueStatus.DRAFT })
   status: LeagueStatus;
 
-  /** 'round' = full schedule upfront with rounds/substitutions; 'session' = flexible evening-based play */
+  /** 'round' = full schedule upfront; 'session' = flexible evening-based; 'euroleague' = multi-phase competition */
   @Column({ default: 'round' })
   mode: string;
+
+  /** Points to the currently active CompetitionPhase (euroleague only) */
+  @Column({ name: 'active_phase_id', nullable: true })
+  activePhaseId: string | null;
 
   @OneToMany(() => LeaguePlayer, (lp) => lp.league)
   leaguePlayers: LeaguePlayer[];

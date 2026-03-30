@@ -89,4 +89,24 @@ export const leaguesApi = {
     api.post(`/clubs/${clubId}/leagues/${leagueId}/sessions/${sessionId}/matches`, {
       homePlayerId, awayPlayerId,
     }).then((r) => r.data),
+
+  // ─── EvroLiga phases ───────────────────────────────────────────────────────
+
+  initPhases: (clubId: string, leagueId: string) =>
+    api.post(`/clubs/${clubId}/leagues/${leagueId}/euroleague/init`).then((r) => r.data),
+
+  getPhases: (clubId: string, leagueId: string) =>
+    api.get(`/clubs/${clubId}/leagues/${leagueId}/phases`).then((r) => r.data),
+
+  getPhaseFixtures: (clubId: string, leagueId: string, phaseId: string) =>
+    api.get(`/clubs/${clubId}/leagues/${leagueId}/phases/${phaseId}/fixtures`).then((r) => r.data),
+
+  getPhaseStandings: (clubId: string, leagueId: string, phaseId: string) =>
+    api.get(`/clubs/${clubId}/leagues/${leagueId}/phases/${phaseId}/standings`).then((r) => r.data),
+
+  updatePhaseMatch: (clubId: string, leagueId: string, phaseId: string, matchId: string, homeSets: number, awaySets: number) =>
+    api.patch(`/clubs/${clubId}/leagues/${leagueId}/phases/${phaseId}/matches/${matchId}`, { homeSets, awaySets }).then((r) => r.data),
+
+  advancePhase: (clubId: string, leagueId: string) =>
+    api.post(`/clubs/${clubId}/leagues/${leagueId}/phases/advance`).then((r) => r.data),
 };

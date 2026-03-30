@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/store/auth.store';
@@ -16,7 +16,7 @@ import {
   AlertCircle, X, ArrowLeftRight, Ban, ChevronRight,
   Trophy, Target, Zap, CheckCircle2, Download, Lock, Unlock,
   UserCheck, ChevronDown, ChevronUp, QrCode, Copy, Check, Search,
-  MoreHorizontal, Grid3x3,
+  MoreHorizontal, Grid3x3, Loader2,
 } from 'lucide-react';
 import QRCodeSVG from 'react-qr-code';
 
@@ -272,6 +272,19 @@ export default function LeagueDetailPage() {
   const [matrixHighlight, setMatrixHighlight] = useState<string | null>(null);
   const [matrixFilter, setMatrixFilter]       = useState<'all' | 'not_played' | 'partial' | 'completed' | 'upcoming'>('all');
   const [matrixMobilePlayer, setMatrixMobilePlayer] = useState<string>('');
+
+  // EvroLiga phase state
+  const [phases,           setPhases]           = useState<any[]>([]);
+  const [activePhaseView,  setActivePhaseView]  = useState<string>('');  // phaseId currently displayed
+  const [phaseFixtures,    setPhaseFixtures]    = useState<any[]>([]);
+  const [phaseStandings,   setPhaseStandings]   = useState<any[]>([]);
+  const [phaseLoading,     setPhaseLoading]     = useState(false);
+  const [advancingPhase,   setAdvancingPhase]   = useState(false);
+  const [phaseTab,         setPhaseTab]         = useState<'tabela' | 'raspored' | 'bracket'>('tabela');
+  const [phaseMatchModal,  setPhaseMatchModal]  = useState<any | null>(null);
+  const [phaseHomeScore,   setPhaseHomeScore]   = useState(0);
+  const [phaseAwayScore,   setPhaseAwayScore]   = useState(0);
+  const [phaseSaveLoading, setPhaseSaveLoading] = useState(false);
 
   // PDF download
   const [downloadingRound, setDownloadingRound]             = useState<number | null>(null);
@@ -574,6 +587,37 @@ export default function LeagueDetailPage() {
 
   useEffect(() => { load(); }, [club?.id, id]);
 
+  // Load EvroLiga phases whenever league data arrives
+  const loadPhases = async (selectPhaseId?: string) => {
+    if (!club?.id || !id) return;
+    try {
+      const ps: any[] = await leaguesApi.getPhases(club.id, id);
+      setPhases(ps);
+      const target = selectPhaseId || ps.find((p: any) => p.status === 'active')?.id || ps[0]?.id;
+      if (target) {
+        setActivePhaseView(target);
+        await loadPhaseData(target);
+      }
+    } catch { /* not euroleague */ }
+  };
+
+  const loadPhaseData = async (phaseId: string) => {
+    if (!club?.id) return;
+    setPhaseLoading(true);
+    try {
+      const [fx, st] = await Promise.all([
+        leaguesApi.getPhaseFixtures(club.id, id, phaseId),
+        leaguesApi.getPhaseStandings(club.id, id, phaseId),
+      ]);
+      setPhaseFixtures(fx);
+      setPhaseStandings(st);
+    } finally { setPhaseLoading(false); }
+  };
+
+  useEffect(() => {
+    if (league?.mode === 'euroleague' && club?.id) loadPhases();
+  }, [league?.mode, club?.id, id]);
+
   // Auto-hide bottom bar on scroll down, show on scroll up
   useEffect(() => {
     const onScroll = () => {
@@ -593,7 +637,16 @@ export default function LeagueDetailPage() {
   const generate = async () => {
     if (lPlayers.length < 2) { alert('Potrebna su najmanje 2 igrača'); return; }
     setGenerating(true);
-    try { await leaguesApi.generateFixtures(club!.id, id); load(); } finally { setGenerating(false); }
+    try {
+      if (league?.mode === 'euroleague') {
+        await leaguesApi.initPhases(club!.id, id);
+        await load();
+        await loadPhases();
+      } else {
+        await leaguesApi.generateFixtures(club!.id, id);
+        await load();
+      }
+    } finally { setGenerating(false); }
   };
 
   /* ── bulk player import ──────────────────────────────────── */
@@ -683,6 +736,7 @@ export default function LeagueDetailPage() {
 
   // Mode driven by league.mode: 'session' = flexible evenings; 'round' = full upfront schedule
   const isSessionMode = league?.mode === 'session';
+  const isEuroleague  = league?.mode === 'euroleague';
 
   // Computed for sticky mobile action bar
   const activeSessionForBar = sessions.find((s: any) => s.status === 'open');
@@ -828,7 +882,7 @@ export default function LeagueDetailPage() {
         </div>
 
         {/* ══════════════════ TABELA ══════════════════════════ */}
-        {tab === 'tabela' && (
+        {tab === 'tabela' && !isEuroleague && (
           <div className="animate-fade-in-up space-y-4">
 
             {/* ── Action bar ─────────────────────────────────────── */}
@@ -1137,7 +1191,7 @@ export default function LeagueDetailPage() {
         )}
 
         {/* ══════════════════ RASPORED ════════════════════════ */}
-        {tab === 'raspored' && (
+        {tab === 'raspored' && !isEuroleague && (
           <div className={`animate-fade-in-up space-y-3 ${canEdit && activeSessionForBar && isSessionMode ? 'pb-32 lg:pb-0' : ''}`}>
 
             {/* ── SESSION MODE ─────────────────────────────────────── */}
@@ -1879,7 +1933,7 @@ export default function LeagueDetailPage() {
         )}
 
         {/* ══════════════════ ODLOŽENI ════════════════════════ */}
-        {tab === 'odlozeni' && (
+        {tab === 'odlozeni' && !isEuroleague && (
           <div className="animate-fade-in-up space-y-4">
 
             {/* Postponed matches */}
@@ -1980,7 +2034,7 @@ export default function LeagueDetailPage() {
         )}
 
         {/* ══════════════════ IGRAČI — DIRECTORY ══════════════════ */}
-        {tab === 'igraci' && (() => {
+        {tab === 'igraci' && !isEuroleague && (() => {
           // ── helpers ─────────────────────────────────────────────
           const getForm = (playerId: string): ('W' | 'L' | 'D')[] => {
             const done = fixtures
@@ -3178,8 +3232,383 @@ export default function LeagueDetailPage() {
         );
       })()}
 
+      {/* ══════════════════ EVROLIGA ══════════════════════════════ */}
+      {isEuroleague && (() => {
+        const TBD_ID = '00000000-0000-0000-0000-000000000001';
+        const activePhase = phases.find((p: any) => p.id === activePhaseView);
+        const isPlayoff   = activePhase?.type === 'knockout';
+        const allPending  = phases.length > 0 && phases.every((p: any) => p.status === 'pending');
+        const canAdvance  = canEdit && activePhase?.status === 'active' && phases.find((p: any) => p.phaseOrder === (activePhase?.phaseOrder ?? 0) + 1);
+
+        /* ── phase standings-based colors ── */
+        const medalColor  = (pos: number) =>
+          pos === 1 ? '#facc15' : pos === 2 ? '#cbd5e1' : pos === 3 ? '#f97316' : 'var(--text-secondary)';
+
+        /* ── phase rounds (for Raspored tab) ── */
+        const phaseByRound: Record<number, any[]> = {};
+        for (const m of phaseFixtures) {
+          const r = m.roundNumber ?? 1;
+          if (!phaseByRound[r]) phaseByRound[r] = [];
+          phaseByRound[r].push(m);
+        }
+
+        /* ── playoff matches ── */
+        const sf1    = phaseFixtures.find((m: any) => m.phaseMatchType === 'semifinal_1');
+        const sf2    = phaseFixtures.find((m: any) => m.phaseMatchType === 'semifinal_2');
+        const final  = phaseFixtures.find((m: any) => m.phaseMatchType === 'final');
+
+        /* ── PlayoffCard ── */
+        const PlayoffCard = ({ match, label }: { match: any; label: string }) => {
+          if (!match) return (
+            <div className="rounded-2xl border-2 border-dashed border-slate-700 flex items-center justify-center h-28 text-slate-600 text-sm font-medium">
+              {label}
+            </div>
+          );
+          const isTBD    = match.homePlayerId === TBD_ID || match.awayPlayerId === TBD_ID;
+          const done     = match.status === 'completed';
+          const homeWon  = done && match.winnerId === match.homePlayerId;
+          const awayWon  = done && match.winnerId === match.awayPlayerId;
+          const home     = match.homePlayer;
+          const away     = match.awayPlayer;
+
+          return (
+            <button
+              onClick={() => { if (canEdit && !isTBD) { setPhaseMatchModal(match); setPhaseHomeScore(match.homeSets ?? 0); setPhaseAwayScore(match.awaySets ?? 0); } }}
+              className={`w-full rounded-2xl border text-left transition-all duration-200 overflow-hidden
+                ${done ? 'border-slate-700' : 'border-slate-600 hover:-translate-y-0.5 hover:brightness-110 active:scale-[0.97]'}
+                ${canEdit && !isTBD && !done ? 'cursor-pointer' : 'cursor-default'}`}
+              style={{ backgroundColor: 'var(--bg-secondary)' }}
+            >
+              {/* Label bar */}
+              <div className="px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-center"
+                style={{ backgroundColor: 'rgba(249,115,22,0.08)', color: '#f97316', borderBottom: '1px solid var(--border)' }}>
+                {label}
+              </div>
+              <div className="px-4 py-3 space-y-2">
+                {/* Home player */}
+                <div className={`flex items-center gap-2.5 transition-opacity ${awayWon ? 'opacity-35' : ''}`}>
+                  {home && !isTBD ? (
+                    <Avatar name={home.fullName} size="sm" />
+                  ) : (
+                    <div className="w-7 h-7 rounded-full bg-slate-700 shrink-0 flex items-center justify-center text-slate-500 text-xs">?</div>
+                  )}
+                  <span className={`flex-1 text-sm truncate ${homeWon ? 'font-bold text-white' : 'font-medium'}`}
+                    style={{ color: homeWon ? '#f97316' : 'var(--text-primary)' }}>
+                    {isTBD ? 'TBD' : (home?.fullName || '—')}
+                  </span>
+                  {done && <span className={`text-xl font-black tabular-nums ${homeWon ? 'text-white' : 'text-slate-500'}`}>{match.homeSets}</span>}
+                  {homeWon && <span className="text-orange-400 text-xs font-bold">🏆</span>}
+                </div>
+                {/* Divider + VS */}
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
+                  <span className="text-xs font-bold text-slate-600">
+                    {done ? 'vs' : isTBD ? '⋯' : 'VS'}
+                  </span>
+                  <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
+                </div>
+                {/* Away player */}
+                <div className={`flex items-center gap-2.5 transition-opacity ${homeWon ? 'opacity-35' : ''}`}>
+                  {away && !isTBD ? (
+                    <Avatar name={away.fullName} size="sm" />
+                  ) : (
+                    <div className="w-7 h-7 rounded-full bg-slate-700 shrink-0 flex items-center justify-center text-slate-500 text-xs">?</div>
+                  )}
+                  <span className={`flex-1 text-sm truncate ${awayWon ? 'font-bold text-white' : 'font-medium'}`}
+                    style={{ color: awayWon ? '#f97316' : 'var(--text-primary)' }}>
+                    {isTBD ? 'TBD' : (away?.fullName || '—')}
+                  </span>
+                  {done && <span className={`text-xl font-black tabular-nums ${awayWon ? 'text-white' : 'text-slate-500'}`}>{match.awaySets}</span>}
+                  {awayWon && <span className="text-orange-400 text-xs font-bold">🏆</span>}
+                </div>
+              </div>
+            </button>
+          );
+        };
+
+        /* ── phase match score modal ── */
+        const PhaseMatchModal = () => {
+          const m = phaseMatchModal;
+          if (!m) return null;
+          const ph = phases.find((p: any) => p.id === m.phaseId);
+          const isKnockout = ph?.type === 'knockout';
+          const maxSets = isKnockout ? (league.setsPerMatch || 3) : undefined;
+
+          return (
+            <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+              onClick={(e) => e.target === e.currentTarget && setPhaseMatchModal(null)}>
+              <div className="card rounded-2xl p-5 w-full max-w-sm space-y-4 animate-fade-in-up">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-bold text-white">Upiši rezultat</p>
+                  <button onClick={() => setPhaseMatchModal(null)} className="text-slate-400 hover:text-white">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 text-center">
+                    <Avatar name={m.homePlayer?.fullName} size="md" />
+                    <p className="text-xs font-semibold text-white mt-1.5 truncate">{m.homePlayer?.fullName}</p>
+                    <input type="number" min={0} max={maxSets || 99}
+                      value={phaseHomeScore} onChange={e => setPhaseHomeScore(parseInt(e.target.value) || 0)}
+                      className="mt-2 w-16 h-10 text-center text-xl font-bold rounded-xl bg-slate-800 border border-slate-600 text-white focus:border-orange-500 focus:outline-none"
+                    />
+                  </div>
+                  <span className="text-slate-500 font-bold text-sm">:</span>
+                  <div className="flex-1 text-center">
+                    <Avatar name={m.awayPlayer?.fullName} size="md" />
+                    <p className="text-xs font-semibold text-white mt-1.5 truncate">{m.awayPlayer?.fullName}</p>
+                    <input type="number" min={0} max={maxSets || 99}
+                      value={phaseAwayScore} onChange={e => setPhaseAwayScore(parseInt(e.target.value) || 0)}
+                      className="mt-2 w-16 h-10 text-center text-xl font-bold rounded-xl bg-slate-800 border border-slate-600 text-white focus:border-orange-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+                {isKnockout && (
+                  <p className="text-xs text-slate-500 text-center">
+                    Best of {maxSets} setova — potrebno {Math.ceil((maxSets || 3) / 2)} za pobedu
+                  </p>
+                )}
+                <button
+                  disabled={phaseSaveLoading}
+                  onClick={async () => {
+                    if (!club?.id || !m.phaseId) return;
+                    setPhaseSaveLoading(true);
+                    try {
+                      await leaguesApi.updatePhaseMatch(club.id, id, m.phaseId, m.id, phaseHomeScore, phaseAwayScore);
+                      setPhaseMatchModal(null);
+                      await loadPhaseData(activePhaseView);
+                    } finally { setPhaseSaveLoading(false); }
+                  }}
+                  className="w-full h-11 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-semibold text-sm transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {phaseSaveLoading ? <><Loader2 className="w-4 h-4 animate-spin" /> Čuvanje...</> : 'Sačuvaj rezultat'}
+                </button>
+              </div>
+            </div>
+          );
+        };
+
+        return (
+          <div className="animate-fade-in-up space-y-4">
+
+            {/* Phase selector */}
+            <div className="card px-4 py-3">
+              <div className="flex flex-wrap gap-2 items-center justify-between">
+                <div className="flex flex-wrap gap-2">
+                  {phases.map((p: any) => {
+                    const isActive = p.id === activePhaseView;
+                    const statusColor =
+                      p.status === 'active'    ? '#f97316' :
+                      p.status === 'completed' ? '#34d399' : 'var(--text-secondary)';
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={async () => { setActivePhaseView(p.id); await loadPhaseData(p.id); setPhaseTab(p.type === 'knockout' ? 'bracket' : 'tabela'); }}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all
+                          ${isActive ? 'bg-orange-500/15 border border-orange-500/40 text-white' : 'bg-slate-800/60 border border-slate-700 hover:border-slate-500'}`}
+                        style={{ color: isActive ? undefined : statusColor }}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0"
+                          style={{ backgroundColor: statusColor }} />
+                        {p.name}
+                        {p.status === 'active' && <span className="text-[10px] opacity-60">●</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+                {canAdvance && (
+                  <button
+                    disabled={advancingPhase}
+                    onClick={async () => {
+                      if (!confirm(`Napredovati u sledeću fazu?`)) return;
+                      setAdvancingPhase(true);
+                      try {
+                        const ps = await leaguesApi.advancePhase(club!.id, id);
+                        setPhases(ps);
+                        const next = ps.find((p: any) => p.status === 'active');
+                        if (next) { setActivePhaseView(next.id); await loadPhaseData(next.id); setPhaseTab(next.type === 'knockout' ? 'bracket' : 'tabela'); }
+                      } finally { setAdvancingPhase(false); }
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 transition-all disabled:opacity-50"
+                  >
+                    {advancingPhase ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                    Sledeća faza
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Phase sub-tab bar */}
+            {!isPlayoff && (
+              <div className="flex gap-1 bg-slate-800 rounded-xl p-1 w-fit">
+                {(['tabela', 'raspored'] as const).map(pt => (
+                  <button key={pt} onClick={() => setPhaseTab(pt)}
+                    className={`px-4 py-2 text-sm font-medium rounded-lg transition-all
+                      ${phaseTab === pt ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>
+                    {pt === 'tabela' ? 'Tabela' : 'Raspored'}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {phaseLoading && (
+              <div className="card px-4 py-8 flex items-center justify-center text-slate-500 text-sm gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" /> Učitavanje...
+              </div>
+            )}
+
+            {/* ── TABELA phase standings ── */}
+            {!phaseLoading && !isPlayoff && phaseTab === 'tabela' && (
+              <div className="card overflow-hidden">
+                {phaseStandings.length === 0 ? (
+                  <div className="px-4 py-8 text-center text-slate-500 text-sm">Nema podataka za ovu fazu</div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                        {['#', 'Igrač', 'M', 'P', 'R', 'O', 'S+', 'S−', 'Bod.'].map(h => (
+                          <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {phaseStandings.map((s: any, i: number) => (
+                        <tr key={s.playerId} style={{ borderBottom: i < phaseStandings.length - 1 ? '1px solid var(--border)' : undefined }}>
+                          <td className="px-3 py-2.5 tabular-nums font-bold text-xs" style={{ color: medalColor(s.position) }}>{s.position}</td>
+                          <td className="px-3 py-2.5">
+                            <div className="flex items-center gap-2">
+                              <Avatar name={s.player?.fullName} size="sm" />
+                              <span className="font-medium truncate max-w-[8rem]" style={{ color: 'var(--text-primary)' }}>{s.player?.fullName}</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5 tabular-nums text-center" style={{ color: 'var(--text-secondary)' }}>{s.played}</td>
+                          <td className="px-3 py-2.5 tabular-nums text-center text-emerald-400">{s.wins}</td>
+                          <td className="px-3 py-2.5 tabular-nums text-center text-amber-400">{s.draws}</td>
+                          <td className="px-3 py-2.5 tabular-nums text-center text-red-400">{s.losses}</td>
+                          <td className="px-3 py-2.5 tabular-nums text-center text-emerald-400">{s.setsFor}</td>
+                          <td className="px-3 py-2.5 tabular-nums text-center text-red-400">{s.setsAgainst}</td>
+                          <td className="px-3 py-2.5 tabular-nums font-bold text-center text-orange-400">{s.points}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+
+            {/* ── RASPORED phase fixtures ── */}
+            {!phaseLoading && !isPlayoff && phaseTab === 'raspored' && (
+              <div className="space-y-3">
+                {Object.keys(phaseByRound).length === 0 ? (
+                  <div className="card px-4 py-8 text-center text-slate-500 text-sm">Nema mečeva</div>
+                ) : (
+                  Object.entries(phaseByRound).map(([round, matches]) => (
+                    <div key={round} className="card overflow-hidden">
+                      <div className="px-4 py-2.5 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
+                        <span className="text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Kolo {round}</span>
+                        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                          {(matches as any[]).filter(m => m.status === 'completed').length}/{(matches as any[]).length}
+                        </span>
+                      </div>
+                      <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
+                        {(matches as any[]).map((m: any) => {
+                          const done = m.status === 'completed';
+                          const homeWon = done && m.winnerId === m.homePlayerId;
+                          const awayWon = done && m.winnerId === m.awayPlayerId;
+                          return (
+                            <button
+                              key={m.id}
+                              onClick={() => { if (canEdit) { setPhaseMatchModal(m); setPhaseHomeScore(m.homeSets ?? 0); setPhaseAwayScore(m.awaySets ?? 0); } }}
+                              className={`w-full flex items-center px-4 py-3 gap-3 text-left transition-all ${canEdit ? 'hover:brightness-110 active:scale-[0.99] cursor-pointer' : 'cursor-default'}`}
+                            >
+                              <div className="flex-1 flex items-center gap-2 justify-end">
+                                <span className={`text-sm truncate max-w-[7rem] ${homeWon ? 'font-bold' : ''}`}
+                                  style={{ color: homeWon ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+                                  {m.homePlayer?.fullName}
+                                </span>
+                                <Avatar name={m.homePlayer?.fullName} size="sm" />
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {done ? (
+                                  <>
+                                    <span className={`text-base font-black tabular-nums w-5 text-center ${homeWon ? 'text-white' : 'text-slate-500'}`}>{m.homeSets}</span>
+                                    <span className="text-slate-600 text-xs">:</span>
+                                    <span className={`text-base font-black tabular-nums w-5 text-center ${awayWon ? 'text-white' : 'text-slate-500'}`}>{m.awaySets}</span>
+                                  </>
+                                ) : (
+                                  <span className="text-xs font-semibold text-slate-600 px-2">vs</span>
+                                )}
+                              </div>
+                              <div className="flex-1 flex items-center gap-2">
+                                <Avatar name={m.awayPlayer?.fullName} size="sm" />
+                                <span className={`text-sm truncate max-w-[7rem] ${awayWon ? 'font-bold' : ''}`}
+                                  style={{ color: awayWon ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+                                  {m.awayPlayer?.fullName}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            {/* ── PLAYOFF BRACKET ── */}
+            {!phaseLoading && isPlayoff && (
+              <div className="animate-fade-in-up">
+                {/* Desktop bracket */}
+                <div className="hidden md:block">
+                  <div className="max-w-3xl mx-auto px-6 py-4">
+                    {/* Semifinal row */}
+                    <div className="grid grid-cols-2 gap-8 mb-6">
+                      <PlayoffCard match={sf1} label="Polufinale 1" />
+                      <PlayoffCard match={sf2} label="Polufinale 2" />
+                    </div>
+
+                    {/* Connector lines */}
+                    <div className="relative h-8 mb-6">
+                      <div className="absolute left-1/4 right-1/4 top-0 h-px" style={{ backgroundColor: 'var(--border)' }} />
+                      <div className="absolute left-1/4 top-0 bottom-0 w-px" style={{ backgroundColor: 'var(--border)' }} />
+                      <div className="absolute right-1/4 top-0 bottom-0 w-px" style={{ backgroundColor: 'var(--border)' }} />
+                      <div className="absolute left-1/2 -translate-x-1/2 top-0 h-full w-px" style={{ backgroundColor: 'var(--border)' }} />
+                    </div>
+
+                    {/* Final */}
+                    <div className="max-w-sm mx-auto">
+                      <PlayoffCard match={final} label="🏆 Finale" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Mobile: stacked */}
+                <div className="md:hidden space-y-4">
+                  <PlayoffCard match={sf1} label="Polufinale 1" />
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
+                    <ChevronDown className="w-4 h-4 text-slate-600" />
+                    <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
+                  </div>
+                  <PlayoffCard match={sf2} label="Polufinale 2" />
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
+                    <ChevronDown className="w-4 h-4 text-slate-600" />
+                    <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
+                  </div>
+                  <PlayoffCard match={final} label="🏆 Finale" />
+                </div>
+              </div>
+            )}
+
+            <PhaseMatchModal />
+          </div>
+        );
+      })()}
+
       {/* ══════════════════ MATRICA ══════════════════════════════ */}
-      {tab === 'matrica' && (() => {
+      {tab === 'matrica' && !isEuroleague && (() => {
         const expectedPerPair = league.format === 'home_away' ? 2 : 1;
 
         /* ── sort by standing position ── */
@@ -3728,7 +4157,7 @@ export default function LeagueDetailPage() {
               <div className="space-y-2">
                 {mobileOpponents.map(({ lp, cell }) => {
                   const name = lp.player?.fullName || lp.playerId;
-                  let statusEl: JSX.Element;
+                  let statusEl: React.ReactElement;
                   if (cell?.status === 'completed')
                     statusEl = <span className="badge badge-win text-[10px] shrink-0">✓ Završeno</span>;
                   else if (cell?.status === 'partial')

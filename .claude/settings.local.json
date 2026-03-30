@@ -61,7 +61,8 @@
       "Bash(find 'C:/Users/Halkon/Desktop/pikado app/frontend/.next/dev/server' -name *.js)",
       "Bash(xargs grep:*)",
       "Bash(powershell -Command \"Start-Process cmd -ArgumentList ''/k cd /d \"\"C:\\\\Users\\\\Halkon\\\\Desktop\\\\pikado app\\\\frontend\"\" && npm run dev -- --port 3002''\")",
-      "Bash(npx --yes kill-port 3002)"
+      "Bash(npx --yes kill-port 3002)",
+      "Bash(npx next:*)"
     ]
   }
 }

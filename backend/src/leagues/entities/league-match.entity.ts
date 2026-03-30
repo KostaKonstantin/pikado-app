@@ -108,6 +108,14 @@ export class LeagueMatch {
   @Column({ name: 'is_substitution_match', default: false })
   isSubstitutionMatch: boolean;
 
+  /** FK to CompetitionPhase — null for 'round' and 'session' leagues */
+  @Column({ name: 'phase_id', nullable: true, type: 'uuid' })
+  phaseId: string | null;
+
+  /** Playoff match role: 'semifinal_1' | 'semifinal_2' | 'final' | null */
+  @Column({ name: 'phase_match_type', nullable: true })
+  phaseMatchType: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
