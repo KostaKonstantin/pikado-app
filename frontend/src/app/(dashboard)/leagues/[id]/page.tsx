@@ -922,15 +922,7 @@ export default function LeagueDetailPage() {
                         }}
                       >
                         <span className="text-xl sm:text-2xl leading-none">{medalEmoji(s.position)}</span>
-                        <div
-                          className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-sm font-bold ${
-                            s.position === 1 ? 'bg-yellow-400/20 text-yellow-400' :
-                            s.position === 2 ? 'bg-slate-400/15 text-slate-300' :
-                                               'bg-orange-700/20 text-orange-500'
-                          }`}
-                        >
-                          {(s.player?.fullName || '?').split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()}
-                        </div>
+                        <Avatar name={s.player?.fullName} size="lg" />
                         <div className="text-center min-w-0 w-full">
                           <p className="text-xs sm:text-sm font-bold text-white truncate leading-tight">
                             {s.player?.fullName?.split(' ')[0]}
