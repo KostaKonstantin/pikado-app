@@ -23,18 +23,19 @@ export class SessionService {
 
   // ─── Smart pairing algorithm ─────────────────────────────────────────────────
   //
-  // Given the unassigned pool and a list of present players, picks the optimal
-  // set of matches for this session:
+  // Multi-pass round-by-round scheduler:
   //
   //   1. Filter candidates — only matches where BOTH players are present
   //   2. Sort by matchOrder (natural Circle-Method progression: earlier rounds first)
-  //      → ensures league advances evenly; players meet in the "natural" order
-  //   3. Greedy assignment — iterate sorted candidates:
-  //      - Accept if neither player has yet reached maxPerPlayer for this session
-  //      - Reject (will be picked up in a future session) otherwise
+  //   3. Run maxPerPlayer passes. In each pass every player may receive at most
+  //      ONE match — equivalent to constructing one full round per pass.
+  //      This guarantees maximum utilisation even when the pool contains partial
+  //      rounds left over from previous sessions (a single-pass greedy can
+  //      strand a player at N-1 matches when the pool has incomplete rounds).
   //
-  // Complexity: O(n log n) for sort + O(n) for greedy scan.
-  // Guarantees: no player > maxPerPlayer matches, maximises useful pairings.
+  // Complexity: O(maxPerPlayer × candidates) — negligible for typical league sizes.
+  // Guarantees: no player > maxPerPlayer matches; same pair never scheduled twice;
+  //             always achieves floor(N × maxPerPlayer / 2) when the pool allows.
   // ─────────────────────────────────────────────────────────────────────────────
   private selectMatches(
     pool: LeagueMatch[],
@@ -47,21 +48,32 @@ export class SessionService {
       .filter((m) => presentSet.has(m.homePlayerId) && presentSet.has(m.awayPlayerId))
       .sort((a, b) => a.matchOrder - b.matchOrder);
 
-    const playerCount = new Map<string, number>();
+    const playerCount  = new Map<string, number>();
     const scheduledPairs = new Set<string>(); // prevents same pair twice in one session
+    const usedMatchIds   = new Set<string>(); // matches already selected
     const selected: LeagueMatch[] = [];
 
-    for (const match of candidates) {
-      const pairKey = [match.homePlayerId, match.awayPlayerId].sort().join('|');
-      if (scheduledPairs.has(pairKey)) continue; // same pair already scheduled this session
+    for (let pass = 0; pass < maxPerPlayer; pass++) {
+      const busyThisPass = new Set<string>(); // each player may play at most once per pass
 
-      const hc = playerCount.get(match.homePlayerId) ?? 0;
-      const ac = playerCount.get(match.awayPlayerId) ?? 0;
-      if (hc < maxPerPlayer && ac < maxPerPlayer) {
-        selected.push(match);
-        playerCount.set(match.homePlayerId, hc + 1);
-        playerCount.set(match.awayPlayerId, ac + 1);
-        scheduledPairs.add(pairKey);
+      for (const match of candidates) {
+        if (usedMatchIds.has(match.id)) continue;
+
+        const pairKey = [match.homePlayerId, match.awayPlayerId].sort().join('|');
+        if (scheduledPairs.has(pairKey)) continue;
+        if (busyThisPass.has(match.homePlayerId) || busyThisPass.has(match.awayPlayerId)) continue;
+
+        const hc = playerCount.get(match.homePlayerId) ?? 0;
+        const ac = playerCount.get(match.awayPlayerId) ?? 0;
+        if (hc < maxPerPlayer && ac < maxPerPlayer) {
+          selected.push(match);
+          usedMatchIds.add(match.id);
+          playerCount.set(match.homePlayerId, hc + 1);
+          playerCount.set(match.awayPlayerId, ac + 1);
+          scheduledPairs.add(pairKey);
+          busyThisPass.add(match.homePlayerId);
+          busyThisPass.add(match.awayPlayerId);
+        }
       }
     }
 
