@@ -56,7 +56,7 @@ export class League {
   mode: string;
 
   /** Points to the currently active CompetitionPhase (euroleague only) */
-  @Column({ name: 'active_phase_id', nullable: true })
+  @Column({ name: 'active_phase_id', type: 'varchar', nullable: true })
   activePhaseId: string | null;
 
   @OneToMany(() => LeaguePlayer, (lp) => lp.league)

@@ -113,7 +113,7 @@ export class LeagueMatch {
   phaseId: string | null;
 
   /** Playoff match role: 'semifinal_1' | 'semifinal_2' | 'final' | null */
-  @Column({ name: 'phase_match_type', nullable: true })
+  @Column({ name: 'phase_match_type', type: 'varchar', nullable: true })
   phaseMatchType: string | null;
 
   @CreateDateColumn({ name: 'created_at' })
