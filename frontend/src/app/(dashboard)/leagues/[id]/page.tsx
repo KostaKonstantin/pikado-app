@@ -16,11 +16,11 @@ import {
   AlertCircle, X, ArrowLeftRight, Ban, ChevronRight,
   Trophy, Target, Zap, CheckCircle2, Download, Lock, Unlock,
   UserCheck, ChevronDown, ChevronUp, QrCode, Copy, Check, Search,
-  MoreHorizontal,
+  MoreHorizontal, Grid3x3,
 } from 'lucide-react';
 import QRCodeSVG from 'react-qr-code';
 
-type Tab = 'tabela' | 'raspored' | 'odlozeni' | 'igraci';
+type Tab = 'tabela' | 'raspored' | 'odlozeni' | 'igraci' | 'matrica';
 
 /* ─── helpers ──────────────────────────────────────────────────────── */
 
@@ -266,6 +266,12 @@ export default function LeagueDetailPage() {
   // QR code modal
   const [showQr, setShowQr]   = useState(false);
   const [copied, setCopied]   = useState(false);
+
+  // Matrix tab
+  const [matrixCell, setMatrixCell]           = useState<{ aId: string; bId: string } | null>(null);
+  const [matrixHighlight, setMatrixHighlight] = useState<string | null>(null);
+  const [matrixFilter, setMatrixFilter]       = useState<'all' | 'not_played' | 'partial' | 'completed' | 'upcoming'>('all');
+  const [matrixMobilePlayer, setMatrixMobilePlayer] = useState<string>('');
 
   // PDF download
   const [downloadingRound, setDownloadingRound]             = useState<number | null>(null);
@@ -733,10 +739,11 @@ export default function LeagueDetailPage() {
   const postponedMatches = fixtures.filter((m: any) => m.isPostponed && m.status !== 'completed');
 
   const TABS: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = [
-    { id: 'tabela',   label: 'Tabela',   icon: <BarChart3 className="w-3.5 h-3.5" /> },
-    { id: 'raspored', label: 'Raspored', icon: <Calendar  className="w-3.5 h-3.5" /> },
+    { id: 'tabela',   label: 'Tabela',   icon: <BarChart3  className="w-3.5 h-3.5" /> },
+    { id: 'raspored', label: 'Raspored', icon: <Calendar   className="w-3.5 h-3.5" /> },
     ...(!isSessionMode ? [{ id: 'odlozeni' as Tab, label: 'Odloženi', icon: <AlertCircle className="w-3.5 h-3.5" />, badge: postponedMatches.length }] : []),
-    { id: 'igraci',   label: 'Igrači',   icon: <Users     className="w-3.5 h-3.5" /> },
+    { id: 'igraci',   label: 'Igrači',   icon: <Users      className="w-3.5 h-3.5" /> },
+    { id: 'matrica',  label: 'Matrica',  icon: <Grid3x3    className="w-3.5 h-3.5" /> },
   ];
 
   /* ── render ──────────────────────────────────────────────── */
@@ -826,12 +833,6 @@ export default function LeagueDetailPage() {
 
             {/* ── Action bar ─────────────────────────────────────── */}
             <div className="flex items-center justify-between gap-2 flex-wrap">
-              <h3 className="font-semibold text-white flex items-center gap-2 text-sm">
-                <BarChart3 className="w-4 h-4 text-slate-400" /> Tabela
-                {standings.length > 0 && (
-                  <span className="text-[11px] text-slate-500 font-normal">{standings.length} igrača</span>
-                )}
-              </h3>
               <div className="flex items-center gap-2 flex-wrap">
                 {fixtures.length > 0 && (
                   <button
@@ -2528,8 +2529,12 @@ export default function LeagueDetailPage() {
           {sessionPresent.size >= 2 && (() => {
             const N = sessionPresent.size;
             const M = sessionMaxPer;
-            const total = (N * M) / 2;
+            const estimate = (N * M) / 2;
             const isValid = (N * M) % 2 === 0;
+            // Use real backend count when preview has been fetched, otherwise show estimate
+            const realCount = sessionPreview?.matchCount;
+            const displayCount = realCount ?? estimate;
+            const isEstimate = realCount === undefined;
             return (
               <div className={`mb-4 px-3.5 py-3 rounded-xl border transition-all ${
                 isValid
@@ -2540,14 +2545,15 @@ export default function LeagueDetailPage() {
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-white">
-                        {total} meč{total !== 1 ? 'a' : ''} večeras
+                        {isEstimate ? '~' : ''}{displayCount} meč{displayCount !== 1 ? 'a' : ''} večeras
                       </p>
                       <p className="text-xs text-slate-400 mt-0.5">
                         {N} igrač{N !== 1 ? 'a' : ''} · svako igra {M} meč{M !== 1 ? 'a' : ''}
+                        {isEstimate && <span className="ml-1 opacity-60">(procena)</span>}
                       </p>
                     </div>
                     <div className="text-2xl font-bold text-orange-400 tabular-nums shrink-0">
-                      {total}
+                      {isEstimate ? '~' : ''}{displayCount}
                     </div>
                   </div>
                 ) : (
@@ -3177,6 +3183,602 @@ export default function LeagueDetailPage() {
             </div>
 
           </Modal>
+        );
+      })()}
+
+      {/* ══════════════════ MATRICA ══════════════════════════════ */}
+      {tab === 'matrica' && (() => {
+        const expectedPerPair = league.format === 'home_away' ? 2 : 1;
+
+        /* ── sort by standing position ── */
+        const sortedPlayers = [...lPlayers].sort((a: any, b: any) => {
+          const aPos = standings.findIndex((s: any) => s.playerId === a.playerId);
+          const bPos = standings.findIndex((s: any) => s.playerId === b.playerId);
+          const aOrd = aPos === -1 ? 999 : aPos;
+          const bOrd = bPos === -1 ? 999 : bPos;
+          if (aOrd !== bOrd) return aOrd - bOrd;
+          return (a.player?.fullName || '').localeCompare(b.player?.fullName || '');
+        });
+
+        /* ── cell data helper ── */
+        const getCellData = (aId: string, bId: string) => {
+          if (aId === bId) return null;
+          const between = fixtures.filter(
+            (m: any) =>
+              (m.homePlayerId === aId && m.awayPlayerId === bId) ||
+              (m.homePlayerId === bId && m.awayPlayerId === aId),
+          );
+          const completed = between.filter((m: any) => m.status === 'completed' || m.status === 'walkover');
+          let status: 'not_played' | 'partial' | 'completed' | 'upcoming';
+          if (between.length === 0)                     status = 'not_played';
+          else if (completed.length === 0)              status = 'upcoming';
+          else if (completed.length >= expectedPerPair) status = 'completed';
+          else                                          status = 'partial';
+          return { between, completed, status };
+        };
+
+        /* ── pre-compute pair stats ── */
+        const allPairs: { aId: string; bId: string }[] = [];
+        for (let i = 0; i < sortedPlayers.length; i++)
+          for (let j = i + 1; j < sortedPlayers.length; j++)
+            allPairs.push({ aId: sortedPlayers[i].playerId, bId: sortedPlayers[j].playerId });
+
+        const pairStats = {
+          completed:  allPairs.filter(p => getCellData(p.aId, p.bId)?.status === 'completed').length,
+          partial:    allPairs.filter(p => getCellData(p.aId, p.bId)?.status === 'partial').length,
+          not_played: allPairs.filter(p => getCellData(p.aId, p.bId)?.status === 'not_played').length,
+          upcoming:   allPairs.filter(p => getCellData(p.aId, p.bId)?.status === 'upcoming').length,
+          total:      allPairs.length,
+        };
+
+        /* ── opacity helper (spotlight + legend filter) ── */
+        const getCellOpacity = (aId: string, bId: string, status: string) => {
+          const inSpotlight  = matrixHighlight === aId || matrixHighlight === bId;
+          const filterMatch  = matrixFilter === 'all' || status === matrixFilter;
+          if (matrixHighlight && matrixFilter !== 'all') return (inSpotlight && filterMatch) ? 1 : 0.15;
+          if (matrixHighlight) return inSpotlight  ? 1 : 0.2;
+          if (matrixFilter !== 'all') return filterMatch ? 1 : 0.18;
+          return 1;
+        };
+
+        /* ── cell component ── */
+        const CellBox = ({ aId, bId }: { aId: string; bId: string }) => {
+          if (aId === bId) {
+            const isDimmed = matrixHighlight !== null || matrixFilter !== 'all';
+            return (
+              <div
+                className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 transition-opacity duration-200"
+                style={{ backgroundColor: 'var(--bg-secondary)', opacity: isDimmed ? 0.12 : 0.5 }}
+              >
+                <span className="text-slate-600 text-[10px]">—</span>
+              </div>
+            );
+          }
+          const cell = getCellData(aId, bId);
+          if (!cell) return null;
+
+          const opacity      = getCellOpacity(aId, bId, cell.status);
+          const inSpotlight  = matrixHighlight === aId || matrixHighlight === bId;
+
+          /* visual per status */
+          let bg = '', border = '', label = '';
+          if (cell.status === 'not_played') {
+            bg = 'rgba(15,23,42,0.7)'; border = '1px dashed rgba(71,85,105,0.55)'; label = '';
+          } else if (cell.status === 'upcoming') {
+            bg = 'rgba(99,102,241,0.12)'; border = '1px solid rgba(99,102,241,0.28)'; label = '⏳';
+          } else if (cell.status === 'partial') {
+            bg = 'rgba(245,158,11,0.14)'; border = '1px solid rgba(245,158,11,0.32)';
+            label = `${cell.completed.length}/${expectedPerPair}`;
+          } else {
+            bg = 'rgba(34,197,94,0.14)'; border = '1px solid rgba(34,197,94,0.3)'; label = '✓';
+          }
+
+          const aName = sortedPlayers.find((p: any) => p.playerId === aId)?.player?.fullName || '';
+          const bName = sortedPlayers.find((p: any) => p.playerId === bId)?.player?.fullName || '';
+          const tipMap: Record<string, string> = {
+            not_played: 'Nije odigrano', upcoming: 'Zakazano',
+            partial: `${cell.completed.length}/${expectedPerPair} odigrano`, completed: 'Završeno',
+          };
+
+          return (
+            <button
+              onClick={() => setMatrixCell({ aId, bId })}
+              title={`${aName} vs ${bName} · ${tipMap[cell.status]}`}
+              className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 cursor-pointer transition-all duration-150 hover:brightness-125 hover:scale-110 active:scale-95 ${
+                cell.status === 'completed'  ? 'text-emerald-400 text-xs font-bold' :
+                cell.status === 'partial'    ? 'text-amber-400 text-[10px] font-bold' :
+                cell.status === 'upcoming'   ? 'text-indigo-400 text-[10px]' :
+                                               'text-slate-700 text-xs'
+              }`}
+              style={{
+                backgroundColor: bg,
+                border: inSpotlight ? '1.5px solid rgba(249,115,22,0.55)' : border,
+                opacity,
+              }}
+            >
+              {label}
+            </button>
+          );
+        };
+
+        /* ── modal ── */
+        const cellModal = matrixCell ? (() => {
+          const { aId, bId } = matrixCell;
+          const aPlayer = sortedPlayers.find((p: any) => p.playerId === aId);
+          const bPlayer = sortedPlayers.find((p: any) => p.playerId === bId);
+          const cell = getCellData(aId, bId);
+          if (!cell) return null;
+
+          const aName = aPlayer?.player?.fullName || '?';
+          const bName = bPlayer?.player?.fullName || '?';
+
+          /* detect missing leg */
+          const hasHomeCompleted = cell.between.some(
+            (m: any) => m.homePlayerId === aId && (m.status === 'completed' || m.status === 'walkover'),
+          );
+          const hasAwayCompleted = cell.between.some(
+            (m: any) => m.homePlayerId === bId && (m.status === 'completed' || m.status === 'walkover'),
+          );
+          const missingLeg = expectedPerPair === 2
+            ? (!hasHomeCompleted && !hasAwayCompleted ? 'oba meča'
+               : !hasHomeCompleted ? `${aName} kao domaćin`
+               : `${bName} kao domaćin`)
+            : null;
+
+          /* status accent colours */
+          const accent =
+            cell.status === 'completed' ? { bg: 'rgba(34,197,94,0.09)',  border: 'rgba(34,197,94,0.22)',  text: '#4ade80' } :
+            cell.status === 'partial'   ? { bg: 'rgba(245,158,11,0.09)', border: 'rgba(245,158,11,0.24)', text: '#fbbf24' } :
+            cell.status === 'upcoming'  ? { bg: 'rgba(99,102,241,0.09)', border: 'rgba(99,102,241,0.22)', text: '#818cf8' } :
+                                          { bg: 'rgba(51,65,85,0.35)',   border: 'rgba(71,85,105,0.4)',   text: '#94a3b8' };
+
+          const statusLabel =
+            cell.status === 'completed' ? `✓ Završeno · ${cell.completed.length}/${expectedPerPair}` :
+            cell.status === 'partial'   ? `${cell.completed.length} / ${expectedPerPair} odigrano` :
+            cell.status === 'upcoming'  ? `${cell.between.length} meč(eva) na čekanju` :
+                                          'Nije odigrano';
+
+          /* shared match row renderer */
+          const MatchRow = ({ m }: { m: any }) => {
+            const done    = m.status === 'completed' || m.status === 'walkover';
+            const aIsHome = m.homePlayerId === aId;
+            const homeN   = aIsHome ? aName : bName;
+            const awayN   = aIsHome ? bName : aName;
+            const aScore  = aIsHome ? m.homeSets : m.awaySets;
+            const bScore  = aIsHome ? m.awaySets : m.homeSets;
+            const aWon    = done && aScore > bScore;
+            const bWon    = done && bScore > aScore;
+            const rnd     = m.roundNumber > 0 ? `R${m.roundNumber}` : '—';
+
+            return (
+              <div
+                className="rounded-xl overflow-hidden"
+                style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
+              >
+                {/* round label */}
+                <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{rnd}</span>
+                  {done && (
+                    <span className={`badge text-[10px] ${aWon ? 'badge-win' : bWon ? 'badge-loss' : 'badge-draw'}`}>
+                      {aWon ? 'Pobeda A' : bWon ? 'Pobeda B' : 'Remi'}
+                    </span>
+                  )}
+                  {!done && m.scheduledDate && (
+                    <span className="text-[10px] text-slate-500">
+                      {new Date(m.scheduledDate).toLocaleDateString('sr-RS', { day: '2-digit', month: '2-digit' })}
+                    </span>
+                  )}
+                </div>
+
+                {/* match layout: Home | score | Away */}
+                <div className="flex items-center gap-2 px-3 pb-3">
+                  {/* Home */}
+                  <div className="flex-1 flex items-center gap-2 min-w-0">
+                    <span
+                      className="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0"
+                      style={{ backgroundColor: 'rgba(249,115,22,0.15)', color: '#f97316' }}
+                    >
+                      DOM
+                    </span>
+                    <span className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
+                      {homeN}
+                    </span>
+                  </div>
+
+                  {/* Score / pending */}
+                  <div className="shrink-0 text-center min-w-[52px]">
+                    {done ? (
+                      <span className="font-mono font-bold text-base tabular-nums" style={{ color: 'var(--text-primary)' }}>
+                        {aScore} : {bScore}
+                      </span>
+                    ) : (
+                      <span className="text-xs font-medium text-slate-500">vs</span>
+                    )}
+                  </div>
+
+                  {/* Away */}
+                  <div className="flex-1 flex items-center justify-end gap-2 min-w-0">
+                    <span className="text-sm font-semibold truncate text-right" style={{ color: 'var(--text-primary)' }}>
+                      {awayN}
+                    </span>
+                    <span
+                      className="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0"
+                      style={{ backgroundColor: 'rgba(99,102,241,0.15)', color: '#818cf8' }}
+                    >
+                      GOS
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          };
+
+          return (
+            <div
+              className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 animate-fade-in"
+              onClick={() => setMatrixCell(null)}
+            >
+              <div
+                className="card w-full max-w-md animate-scale-in rounded-2xl max-h-[85vh] overflow-y-auto"
+                onClick={e => e.stopPropagation()}
+              >
+                {/* ── Header ── */}
+                <div
+                  className="px-5 pt-5 pb-4"
+                  style={{ borderBottom: '1px solid var(--border)' }}
+                >
+                  {/* Close */}
+                  <div className="flex justify-end mb-3">
+                    <button
+                      onClick={() => setMatrixCell(null)}
+                      className="p-1.5 rounded-xl hover:bg-slate-700 transition-colors"
+                      style={{ color: 'var(--text-secondary)' }}
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Players — symmetric layout */}
+                  <div className="flex items-center gap-3">
+                    {/* Player A */}
+                    <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
+                      <Avatar name={aName} size="lg" />
+                      <span className="text-sm font-bold text-center truncate w-full" style={{ color: 'var(--text-primary)' }}>
+                        {aName}
+                      </span>
+                    </div>
+
+                    {/* VS + status pill */}
+                    <div className="flex flex-col items-center gap-2 shrink-0">
+                      <span
+                        className="text-[11px] font-black uppercase tracking-widest"
+                        style={{ color: 'var(--text-secondary)' }}
+                      >
+                        vs
+                      </span>
+                      <span
+                        className="text-[10px] font-semibold px-2.5 py-1 rounded-full whitespace-nowrap"
+                        style={{ backgroundColor: accent.bg, border: `1px solid ${accent.border}`, color: accent.text }}
+                      >
+                        {statusLabel}
+                      </span>
+                    </div>
+
+                    {/* Player B */}
+                    <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
+                      <Avatar name={bName} size="lg" />
+                      <span className="text-sm font-bold text-center truncate w-full" style={{ color: 'var(--text-primary)' }}>
+                        {bName}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Missing leg note (partial only) */}
+                  {cell.status === 'partial' && missingLeg && (
+                    <p className="text-center text-xs mt-3" style={{ color: 'var(--text-secondary)' }}>
+                      Nedostaje: <span className="font-semibold" style={{ color: accent.text }}>{missingLeg}</span>
+                    </p>
+                  )}
+                </div>
+
+                {/* ── Body ── */}
+                <div className="px-5 py-4 space-y-3">
+
+                  {/* NOT PLAYED */}
+                  {cell.status === 'not_played' && (
+                    <p className="text-center text-sm py-2" style={{ color: 'var(--text-secondary)' }}>
+                      Ovaj par još nije igrao.
+                    </p>
+                  )}
+
+                  {/* Match rows */}
+                  {cell.between.length > 0 && cell.between.map((m: any) => (
+                    <MatchRow key={m.id} m={m} />
+                  ))}
+
+                  {/* CTA */}
+                  {(cell.status === 'not_played' || cell.status === 'upcoming' || cell.status === 'partial') && canEdit && (
+                    <button
+                      onClick={() => { setMatrixCell(null); setTab('raspored'); }}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all hover:brightness-110 mt-1"
+                      style={{
+                        backgroundColor: 'var(--bg-secondary)',
+                        border: '1px solid var(--border)',
+                        color: 'var(--text-secondary)',
+                      }}
+                    >
+                      {cell.status === 'not_played' || cell.status === 'upcoming'
+                        ? 'Idi na Raspored'
+                        : 'Unesi rezultat'}
+                      <ChevronRight className="w-4 h-4 shrink-0" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })() : null;
+
+        /* ── mobile: player focus list ── */
+        const mobilePlayerId = matrixMobilePlayer || (sortedPlayers[0]?.playerId ?? '');
+        const mobileOpponents = sortedPlayers
+          .filter((p: any) => p.playerId !== mobilePlayerId)
+          .map((p: any) => ({ lp: p, cell: getCellData(mobilePlayerId, p.playerId) }))
+          .sort((a, b) => {
+            const order: Record<string, number> = { not_played: 0, partial: 1, upcoming: 2, completed: 3 };
+            return (order[a.cell?.status ?? 'not_played'] ?? 0) - (order[b.cell?.status ?? 'not_played'] ?? 0);
+          });
+
+        /* ── empty guard ── */
+        if (lPlayers.length < 2) {
+          return (
+            <div className="animate-fade-in-up">
+              <EmptyState icon={<Grid3x3 className="w-6 h-6" />} title="Nema dovoljno igrača" desc="Dodaj barem 2 igrača da vidiš matricu" small />
+              {cellModal}
+            </div>
+          );
+        }
+
+        /* ── legend config ── */
+        const legendItems = [
+          { id: 'completed'  as const, label: 'Završeno',  dotBg: 'rgba(34,197,94,0.25)',  dotBorder: 'rgba(34,197,94,0.4)',  count: pairStats.completed  },
+          { id: 'partial'    as const, label: 'Delimično', dotBg: 'rgba(245,158,11,0.25)', dotBorder: 'rgba(245,158,11,0.4)', count: pairStats.partial    },
+          { id: 'upcoming'   as const, label: 'Zakazano',  dotBg: 'rgba(99,102,241,0.25)', dotBorder: 'rgba(99,102,241,0.4)', count: pairStats.upcoming   },
+          { id: 'not_played' as const, label: 'Nije',      dotBg: 'rgba(51,65,85,0.6)',    dotBorder: 'rgba(71,85,105,0.5)', count: pairStats.not_played },
+        ];
+
+        const anyActive = matrixFilter !== 'all' || matrixHighlight !== null;
+
+        return (
+          <div className="animate-fade-in-up space-y-4">
+
+            {/* Interactive legend / filter — mobile only (desktop legend lives inside the grid card) */}
+            <div className="relative md:hidden">
+              {/* Right fade — scroll hint on mobile */}
+              <div
+                className="absolute right-0 top-0 bottom-0 w-8 pointer-events-none z-10 md:hidden"
+                style={{ background: 'linear-gradient(to left, var(--bg-primary), transparent)' }}
+              />
+            <div className="flex gap-2 items-center overflow-x-auto pb-1 md:flex-wrap md:overflow-visible md:pb-0" style={{ scrollbarWidth: 'none' }}>
+              {legendItems.map(item => {
+                const active = matrixFilter === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setMatrixFilter(active ? 'all' : item.id)}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium transition-all shrink-0"
+                    style={{
+                      backgroundColor: active ? 'rgba(71,85,105,0.55)' : 'var(--bg-secondary)',
+                      border: active ? '1px solid rgba(100,116,139,0.7)' : '1px solid var(--border)',
+                      color: active ? '#f1f5f9' : 'var(--text-secondary)',
+                      opacity: matrixFilter !== 'all' && !active ? 0.55 : 1,
+                    }}
+                  >
+                    <span
+                      className="w-2.5 h-2.5 rounded-sm shrink-0"
+                      style={{ backgroundColor: item.dotBg, border: `1px solid ${item.dotBorder}` }}
+                    />
+                    {item.label}
+                    <span className="tabular-nums" style={{ color: 'var(--text-secondary)', opacity: 0.8 }}>
+                      {item.count}
+                    </span>
+                  </button>
+                );
+              })}
+              {anyActive && (
+                <button
+                  onClick={() => { setMatrixFilter('all'); setMatrixHighlight(null); }}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs transition-all hover:text-white shrink-0"
+                  style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+                >
+                  <X className="w-3 h-3" /> Reset
+                </button>
+              )}
+            </div>
+            </div>{/* end relative wrapper */}
+
+            {/* ── DESKTOP: full grid ── */}
+            <div className="hidden md:block">
+              <div className="card">
+                {/* Legend chips inside card — desktop */}
+                <div className="px-5 pt-4 pb-3 flex flex-wrap gap-2 items-center" style={{ borderBottom: '1px solid var(--border)' }}>
+                  {legendItems.map(item => {
+                    const active = matrixFilter === item.id;
+                    return (
+                      <button
+                        key={`dl-${item.id}`}
+                        onClick={() => setMatrixFilter(active ? 'all' : item.id)}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
+                        style={{
+                          backgroundColor: active ? 'rgba(71,85,105,0.55)' : 'var(--bg-secondary)',
+                          border: active ? '1px solid rgba(100,116,139,0.7)' : '1px solid var(--border)',
+                          color: active ? '#f1f5f9' : 'var(--text-secondary)',
+                          opacity: matrixFilter !== 'all' && !active ? 0.55 : 1,
+                        }}
+                      >
+                        <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: item.dotBg, border: `1px solid ${item.dotBorder}` }} />
+                        {item.label}
+                        <span className="tabular-nums" style={{ color: 'var(--text-secondary)', opacity: 0.8 }}>{item.count}</span>
+                      </button>
+                    );
+                  })}
+                  {anyActive && (
+                    <button
+                      onClick={() => { setMatrixFilter('all'); setMatrixHighlight(null); }}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs transition-all hover:text-white"
+                      style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+                    >
+                      <X className="w-3 h-3" /> Reset
+                    </button>
+                  )}
+                </div>
+                <div className="overflow-x-auto">
+                <div className="min-w-max px-5 py-4">
+                  {/* Column headers */}
+                  <div className="flex items-end gap-1 mb-1.5" style={{ paddingLeft: '10rem' }}>
+                    {sortedPlayers.map((lp: any) => {
+                      const isCol = matrixHighlight === lp.playerId;
+                      return (
+                        <button
+                          key={lp.playerId}
+                          onClick={() => setMatrixHighlight(matrixHighlight === lp.playerId ? null : lp.playerId)}
+                          className="w-10 flex flex-col items-center transition-all duration-200 hover:opacity-100"
+                          style={{ opacity: matrixHighlight && !isCol ? 0.3 : isCol ? 1 : 0.75 }}
+                          title={lp.player?.fullName}
+                        >
+                          <Avatar name={lp.player?.fullName} size="sm" />
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Rows */}
+                  {sortedPlayers.map((rowPlayer: any) => {
+                    const rowName   = rowPlayer.player?.fullName || rowPlayer.playerId;
+                    const isRowHL   = matrixHighlight === rowPlayer.playerId;
+                    const isColHL   = false; // column highlight handled per-cell
+                    const labelDim  = matrixHighlight && !isRowHL;
+                    return (
+                      <div
+                        key={rowPlayer.playerId}
+                        className="flex items-center gap-1 py-0.5 rounded-lg transition-all duration-200"
+                        style={{
+                          /* NO row-level opacity — cells control their own opacity so
+                             the highlighted column isn't killed by a dimmed parent row */
+                          backgroundColor: isRowHL ? 'rgba(249,115,22,0.05)' : undefined,
+                        }}
+                      >
+                        {/* Row label — dim when another player is spotlighted */}
+                        <button
+                          onClick={() => setMatrixHighlight(matrixHighlight === rowPlayer.playerId ? null : rowPlayer.playerId)}
+                          className="flex items-center gap-2 shrink-0 text-left pr-2 transition-all hover:opacity-100"
+                          style={{ width: '10rem', opacity: labelDim ? 0.28 : 1 }}
+                        >
+                          <Avatar name={rowName} size="sm" />
+                          <span
+                            className="text-xs font-medium truncate"
+                            style={{ color: isRowHL ? '#f97316' : 'var(--text-secondary)', maxWidth: '6.5rem' }}
+                          >
+                            {rowName}
+                          </span>
+                        </button>
+
+                        {/* Cells */}
+                        {sortedPlayers.map((colPlayer: any) => (
+                          <CellBox key={colPlayer.playerId} aId={rowPlayer.playerId} bId={colPlayer.playerId} />
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+                </div>{/* end overflow-x-auto */}
+                {/* Stats bar inside desktop card */}
+                <div className="px-5 py-3 flex flex-wrap gap-x-5 gap-y-2" style={{ borderTop: '1px solid var(--border)' }}>
+                  {[
+                    { label: 'Završeno',  value: pairStats.completed,  color: 'text-emerald-400' },
+                    { label: 'Delimično', value: pairStats.partial,    color: 'text-amber-400'   },
+                    { label: 'Nije',      value: pairStats.not_played, color: 'text-slate-400'   },
+                    { label: 'Ukupno',    value: pairStats.total,      color: 'text-white'       },
+                  ].map(s => (
+                    <div key={s.label} className="flex items-baseline gap-1.5">
+                      <span className={`text-sm font-bold tabular-nums ${s.color}`}>{s.value}</span>
+                      <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{s.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* ── MOBILE: player focus list ── */}
+            <div className="md:hidden space-y-4">
+              {/* Selector */}
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wide block mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                  Izaberi igrača
+                </label>
+                <div className="relative">
+                  <select
+                    value={mobilePlayerId}
+                    onChange={e => setMatrixMobilePlayer(e.target.value)}
+                    className="input-field w-full pr-8 appearance-none"
+                  >
+                    {sortedPlayers.map((p: any) => (
+                      <option key={p.playerId} value={p.playerId}>
+                        {p.player?.fullName || p.playerId}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none text-slate-400" />
+                </div>
+              </div>
+
+              {/* Opponent rows */}
+              <div className="space-y-2">
+                {mobileOpponents.map(({ lp, cell }) => {
+                  const name = lp.player?.fullName || lp.playerId;
+                  let statusEl: JSX.Element;
+                  if (cell?.status === 'completed')
+                    statusEl = <span className="badge badge-win text-[10px] shrink-0">✓ Završeno</span>;
+                  else if (cell?.status === 'partial')
+                    statusEl = <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}>{cell.completed.length}/{expectedPerPair}</span>;
+                  else if (cell?.status === 'upcoming')
+                    statusEl = <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>⏳</span>;
+                  else
+                    statusEl = <span className="text-[10px] text-slate-500 shrink-0">Nije</span>;
+
+                  return (
+                    <button
+                      key={lp.playerId}
+                      onClick={() => setMatrixCell({ aId: mobilePlayerId, bId: lp.playerId })}
+                      className="w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all active:scale-[0.98] hover:brightness-110"
+                      style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
+                    >
+                      <Avatar name={name} size="md" />
+                      <span className="flex-1 text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{name}</span>
+                      {statusEl}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Stats bar — mobile only (desktop has stats inside the grid card) */}
+            <div className="card md:hidden px-4 py-3 flex flex-wrap gap-x-5 gap-y-2">
+              {[
+                { label: 'Završeno',  value: pairStats.completed,  color: 'text-emerald-400' },
+                { label: 'Delimično', value: pairStats.partial,    color: 'text-amber-400'   },
+                { label: 'Nije',      value: pairStats.not_played, color: 'text-slate-400'   },
+                { label: 'Ukupno',    value: pairStats.total,      color: 'text-white'       },
+              ].map(s => (
+                <div key={s.label} className="flex items-baseline gap-1.5">
+                  <span className={`text-sm font-bold tabular-nums ${s.color}`}>{s.value}</span>
+                  <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{s.label}</span>
+                </div>
+              ))}
+            </div>
+
+            {cellModal}
+          </div>
         );
       })()}
 
