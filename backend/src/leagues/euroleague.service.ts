@@ -206,7 +206,7 @@ export class EuroleagueService {
       // else draw → winnerId stays null
     }
 
-    await this.matchRepo.update(matchId, { homeSets, awaySets, ...(winnerId !== null ? { winnerId } : {}), status, playedAt: new Date() });
+    await this.matchRepo.update(matchId, { homeSets, awaySets, winnerId, status, playedAt: new Date() });
 
     // Auto-advance playoff winner to Final
     if (phase.type === 'knockout' && status === MatchStatus.COMPLETED && winnerId) {

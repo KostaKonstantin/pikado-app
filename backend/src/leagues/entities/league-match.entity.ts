@@ -38,8 +38,8 @@ export class LeagueMatch {
   @Column({ name: 'away_legs', default: 0 })
   awayLegs: number;
 
-  @Column({ name: 'winner_id', nullable: true })
-  winnerId: string;
+  @Column({ name: 'winner_id', type: 'varchar', nullable: true })
+  winnerId: string | null;
 
   @Column({ type: 'enum', enum: MatchStatus, default: MatchStatus.PENDING })
   status: MatchStatus;
