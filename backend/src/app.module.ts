@@ -28,6 +28,7 @@ import { LeaguePlayer } from './leagues/entities/league-player.entity';
 import { LeagueMatch } from './leagues/entities/league-match.entity';
 import { LeagueSession } from './leagues/entities/league-session.entity';
 import { LeagueSubstitution } from './leagues/entities/league-substitution.entity';
+import { CompetitionPhase } from './leagues/entities/competition-phase.entity';
 import { Ranking } from './rankings/entities/ranking.entity';
 
 @Module({
@@ -39,7 +40,7 @@ import { Ranking } from './rankings/entities/ranking.entity';
       entities: [
         User, Club, Membership, Player, Season,
         Tournament, TournamentPlayer, Match,
-        League, LeaguePlayer, LeagueMatch, LeagueSession, LeagueSubstitution, Ranking,
+        League, LeaguePlayer, LeagueMatch, LeagueSession, LeagueSubstitution, CompetitionPhase, Ranking,
         Invite,
       ],
       synchronize: true,

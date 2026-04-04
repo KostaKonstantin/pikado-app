@@ -1,43 +1,12 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/auth.store';
 import { playersApi } from '@/lib/api/players.api';
 import { Topbar } from '@/components/layout/topbar';
-import { ArrowLeft, RefreshCw, Plus, CheckCircle2, Users } from 'lucide-react';
+import { ArrowLeft, Plus, CheckCircle2, Users } from 'lucide-react';
 import Link from 'next/link';
-
-/* ─── avatar helpers (mirrors leagues page) ────────────────────── */
-
-function avatarRarity(name: string): 'common' | 'rare' | 'epic' | 'legendary' {
-  const h = Array.from(name || '').reduce((acc, c) => ((acc * 31) + c.charCodeAt(0)) & 0xffff, 7) % 100;
-  if (h >= 97) return 'legendary';
-  if (h >= 85) return 'epic';
-  if (h >= 60) return 'rare';
-  return 'common';
-}
-
-const RARITY_LABEL: Record<string, string> = {
-  legendary: 'Legendary',
-  epic:      'Epic',
-  rare:      'Rare',
-  common:    '',
-};
-const RARITY_COLOR: Record<string, string> = {
-  legendary: 'text-yellow-400',
-  epic:      'text-violet-400',
-  rare:      'text-blue-400',
-  common:    '',
-};
-const RARITY_RING: Record<string, string> = {
-  legendary: 'ring-4 ring-yellow-400/70 shadow-2xl shadow-yellow-400/30',
-  epic:      'ring-4 ring-violet-500/60 shadow-2xl shadow-violet-500/20',
-  rare:      'ring-2 ring-blue-400/50 shadow-lg shadow-blue-400/10',
-  common:    'ring-1 ring-slate-600/50',
-};
-
-/* random reroll seeds so "reroll" always gives a different avatar */
-const REROLL_SEEDS = ['dart', 'bull', 'ace', 'pro', 'champ', 'king', 'legend', 'striker', 'hawk', 'blade'];
+import { DartAvatar } from '@/components/ui/dart-avatar';
 
 export default function NewPlayerPage() {
   const router  = useRouter();
@@ -48,33 +17,7 @@ export default function NewPlayerPage() {
   const [loading, setLoading] = useState(false);
   const [done,    setDone]    = useState<{ id: string; name: string } | null>(null);
 
-  /* avatar preview */
-  const [avatarSeed,    setAvatarSeed]    = useState('');
-  const [rerollOffset,  setRerollOffset]  = useState(0);
-  const [avatarFading,  setAvatarFading]  = useState(false);
-  const prevSeedRef = useRef('');
-
-  /* avatar only changes on reroll button — not while typing */
-  const handleReroll = () => {
-    const next = rerollOffset + 1;
-    setRerollOffset(next);
-    const newSeed = REROLL_SEEDS[next % REROLL_SEEDS.length];
-    setAvatarFading(true);
-    setTimeout(() => {
-      setAvatarSeed(newSeed);
-      setAvatarFading(false);
-    }, 120);
-  };
-
-  /* init on mount */
-  useEffect(() => {
-    setAvatarSeed(REROLL_SEEDS[0]);
-    prevSeedRef.current = REROLL_SEEDS[0];
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const rarity = avatarRarity(avatarSeed || REROLL_SEEDS[0]);
-  const avatarSrc = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(avatarSeed || REROLL_SEEDS[0])}`;
+  const previewName = form.fullName.trim() || 'Novi Igrač';
 
   /* ── submit ─────────────────────────────────────────────────── */
   const handleSubmit = async (e: React.FormEvent) => {
@@ -83,7 +26,7 @@ export default function NewPlayerPage() {
     setLoading(true);
     setError('');
     try {
-      const p = await playersApi.create(club.id, form);
+      const p = await playersApi.create(club.id, { ...form });
       setDone({ id: p.id, name: form.fullName.trim() });
     } catch (err: any) {
       setError(err.response?.data?.message || 'Greška pri dodavanju igrača');
@@ -95,8 +38,6 @@ export default function NewPlayerPage() {
   const handleAddAnother = () => {
     setForm({ fullName: '', nickname: '', country: '' });
     setDone(null);
-    setRerollOffset(0);
-    setAvatarSeed('preview');
   };
 
   /* ── success screen ─────────────────────────────────────────── */
@@ -106,9 +47,7 @@ export default function NewPlayerPage() {
         <Topbar title="Novi Igrač" />
         <div className="min-h-[calc(100vh-56px)] flex items-center justify-center px-4">
           <div className="w-full max-w-sm animate-scale-in flex flex-col items-center text-center gap-6">
-            <div className={`w-24 h-24 rounded-2xl bg-slate-800 overflow-hidden ${RARITY_RING[rarity]}`}>
-              <img src={avatarSrc} alt={done.name} className="w-full h-full object-cover" />
-            </div>
+            <DartAvatar name={done.name} size="xl" />
             <div className="space-y-1">
               <div className="flex items-center justify-center gap-2">
                 <CheckCircle2 className="w-5 h-5 text-green-400" />
@@ -117,11 +56,6 @@ export default function NewPlayerPage() {
               <p className="text-slate-400 text-sm">
                 <span className="text-white font-medium">{done.name}</span> je uspešno kreiran
               </p>
-              {RARITY_LABEL[rarity] && (
-                <p className={`text-xs font-bold tracking-widest uppercase mt-1 ${RARITY_COLOR[rarity]}`}>
-                  {RARITY_LABEL[rarity]} avatar
-                </p>
-              )}
             </div>
             <div className="flex flex-col sm:flex-row gap-3 w-full">
               <button
@@ -163,38 +97,8 @@ export default function NewPlayerPage() {
           </div>
 
           {/* Avatar preview */}
-          <div className="flex flex-col items-center mb-8 gap-3">
-            <div
-              className={`relative w-24 h-24 rounded-2xl bg-slate-800 overflow-hidden transition-all duration-300
-                ${RARITY_RING[rarity]}
-                ${avatarFading ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}
-              `}
-            >
-              <img
-                src={avatarSrc}
-                alt="Avatar preview"
-                className="w-full h-full object-cover scale-110"
-              />
-              {rarity === 'legendary' && (
-                <div className="absolute inset-0 animate-shimmer pointer-events-none" />
-              )}
-            </div>
-
-            <div className="flex flex-col items-center gap-1.5">
-              {RARITY_LABEL[rarity] && (
-                <span className={`text-xs font-bold tracking-widest uppercase ${RARITY_COLOR[rarity]}`}>
-                  {RARITY_LABEL[rarity]}
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={handleReroll}
-                className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-orange-400 transition-colors active:scale-95 px-3 py-1 rounded-lg hover:bg-orange-500/10"
-              >
-                <RefreshCw className="w-3 h-3" />
-                Novi avatar
-              </button>
-            </div>
+          <div className="flex flex-col items-center mb-8">
+            <DartAvatar name={previewName} size="xl" />
           </div>
 
           {/* Error */}

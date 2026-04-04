@@ -1,4 +1,4 @@
-import { IsString, IsOptional } from 'class-validator';
+import { IsString, IsOptional, IsObject } from 'class-validator';
 
 export class CreatePlayerDto {
   @IsString()
@@ -12,7 +12,7 @@ export class CreatePlayerDto {
   @IsOptional()
   country?: string;
 
-  @IsString()
+  @IsObject()
   @IsOptional()
-  avatarUrl?: string;
+  avatar?: Record<string, any>;
 }

@@ -4,17 +4,22 @@ import { LeaguesService } from './leagues.service';
 import { LeaguesController } from './leagues.controller';
 import { FixtureService } from './fixture.service';
 import { SessionService } from './session.service';
+import { EuroleagueService } from './euroleague.service';
 import { League } from './entities/league.entity';
 import { LeaguePlayer } from './entities/league-player.entity';
 import { LeagueMatch } from './entities/league-match.entity';
 import { LeagueSession } from './entities/league-session.entity';
 import { LeagueSubstitution } from './entities/league-substitution.entity';
+import { CompetitionPhase } from './entities/competition-phase.entity';
 import { Membership } from '../memberships/entities/membership.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([League, LeaguePlayer, LeagueMatch, LeagueSession, LeagueSubstitution, Membership])],
+  imports: [TypeOrmModule.forFeature([
+    League, LeaguePlayer, LeagueMatch, LeagueSession, LeagueSubstitution,
+    CompetitionPhase, Membership,
+  ])],
   controllers: [LeaguesController],
-  providers: [LeaguesService, FixtureService, SessionService],
+  providers: [LeaguesService, FixtureService, SessionService, EuroleagueService],
   exports: [LeaguesService],
 })
 export class LeaguesModule {}

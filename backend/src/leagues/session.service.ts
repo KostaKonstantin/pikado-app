@@ -45,7 +45,7 @@ export class SessionService {
     const presentSet = new Set(presentIds);
 
     const candidates = pool
-      .filter((m) => presentSet.has(m.homePlayerId) && presentSet.has(m.awayPlayerId))
+      .filter((m) => m.homePlayerId && m.awayPlayerId && presentSet.has(m.homePlayerId) && presentSet.has(m.awayPlayerId))
       .sort((a, b) => a.matchOrder - b.matchOrder);
 
     const playerCount  = new Map<string, number>();
@@ -61,18 +61,18 @@ export class SessionService {
 
         const pairKey = [match.homePlayerId, match.awayPlayerId].sort().join('|');
         if (scheduledPairs.has(pairKey)) continue;
-        if (busyThisPass.has(match.homePlayerId) || busyThisPass.has(match.awayPlayerId)) continue;
+        if (busyThisPass.has(match.homePlayerId!) || busyThisPass.has(match.awayPlayerId!)) continue;
 
-        const hc = playerCount.get(match.homePlayerId) ?? 0;
-        const ac = playerCount.get(match.awayPlayerId) ?? 0;
+        const hc = playerCount.get(match.homePlayerId!) ?? 0;
+        const ac = playerCount.get(match.awayPlayerId!) ?? 0;
         if (hc < maxPerPlayer && ac < maxPerPlayer) {
           selected.push(match);
           usedMatchIds.add(match.id);
-          playerCount.set(match.homePlayerId, hc + 1);
-          playerCount.set(match.awayPlayerId, ac + 1);
+          playerCount.set(match.homePlayerId!, hc + 1);
+          playerCount.set(match.awayPlayerId!, ac + 1);
           scheduledPairs.add(pairKey);
-          busyThisPass.add(match.homePlayerId);
-          busyThisPass.add(match.awayPlayerId);
+          busyThisPass.add(match.homePlayerId!);
+          busyThisPass.add(match.awayPlayerId!);
         }
       }
     }
@@ -81,12 +81,17 @@ export class SessionService {
   }
 
   // ─── Pool ─────────────────────────────────────────────────────────────────────
-  // Unassigned + pending matches — these are available for future sessions.
-  private async getPool(leagueId: string): Promise<LeagueMatch[]> {
-    return this.matchRepo.find({
-      where: { leagueId, sessionId: IsNull(), status: MatchStatus.PENDING },
-      order: { matchOrder: 'ASC' },
-    });
+  // Unassigned + pending matches available for future sessions.
+  // For euroleague leagues the pool is scoped to the active phase.
+  private async getPool(leagueId: string, phaseId?: string | null): Promise<LeagueMatch[]> {
+    const where: any = { leagueId, sessionId: IsNull(), status: MatchStatus.PENDING };
+    if (phaseId) where.phaseId = phaseId;
+    return this.matchRepo.find({ where, order: { matchOrder: 'ASC' } });
+  }
+
+  // Returns the activePhaseId for euroleague leagues, null otherwise.
+  private activePhaseId(league: League): string | null {
+    return league.mode === 'euroleague' ? league.activePhaseId : null;
   }
 
   // ─── Preview (no side effects) ───────────────────────────────────────────────
@@ -96,13 +101,13 @@ export class SessionService {
     presentPlayerIds: string[],
     maxMatchesPerPlayer = 1,
   ) {
-    await this.verifyLeague(clubId, leagueId);
+    const league = await this.verifyLeague(clubId, leagueId);
 
     if (presentPlayerIds.length < 2) {
       return { matches: [], presentCount: presentPlayerIds.length, matchCount: 0, poolSize: 0 };
     }
 
-    const pool = await this.getPool(leagueId);
+    const pool = await this.getPool(leagueId, this.activePhaseId(league));
     const selected = this.selectMatches(pool, presentPlayerIds, maxMatchesPerPlayer);
 
     const matchesWithPlayers = await Promise.all(
@@ -132,15 +137,16 @@ export class SessionService {
       sessionDate?: string | null;
     },
   ) {
-    await this.verifyLeague(clubId, leagueId);
+    const league = await this.verifyLeague(clubId, leagueId);
 
     const { presentPlayerIds, maxMatchesPerPlayer = 1, sessionDate = null } = body;
+    const phaseId = this.activePhaseId(league);
 
     if (presentPlayerIds.length < 2) {
       throw new BadRequestException('Potrebna su najmanje 2 prisutna igrača');
     }
 
-    const pool = await this.getPool(leagueId);
+    const pool = await this.getPool(leagueId, phaseId);
     const selected = this.selectMatches(pool, presentPlayerIds, maxMatchesPerPlayer);
 
     if (selected.length === 0) {
@@ -159,6 +165,7 @@ export class SessionService {
     const session = await this.sessionRepo.save(
       this.sessionRepo.create({
         leagueId,
+        phaseId,
         sessionNumber,
         sessionDate,
         status: 'open',
@@ -182,11 +189,18 @@ export class SessionService {
   }
 
   // ─── List sessions ────────────────────────────────────────────────────────────
-  async getSessions(clubId: string, leagueId: string) {
-    await this.verifyLeague(clubId, leagueId);
+  async getSessions(clubId: string, leagueId: string, phaseIdOverride?: string) {
+    const league = await this.verifyLeague(clubId, leagueId);
+
+    // Caller may specify an explicit phaseId (e.g. when viewing a completed phase).
+    // Otherwise fall back to the league's active phase (for euroleague) or no filter.
+    const phaseId = phaseIdOverride ?? this.activePhaseId(league);
+
+    const where: any = { leagueId };
+    if (phaseId) where.phaseId = phaseId;
 
     const sessions = await this.sessionRepo.find({
-      where: { leagueId },
+      where,
       order: { sessionNumber: 'ASC' },
     });
 
@@ -268,6 +282,7 @@ export class SessionService {
         status: MatchStatus.PENDING,
         homeSets: 0,
         awaySets: 0,
+        winnerId: null,
         isWalkover: false,
       },
     );
@@ -380,8 +395,8 @@ export class SessionService {
         ],
       });
       if (existing) {
-        finalHomeId = existing.awayPlayerId;
-        finalAwayId = existing.homePlayerId;
+        finalHomeId = existing.awayPlayerId!;
+        finalAwayId = existing.homePlayerId!;
       }
     }
 
@@ -412,12 +427,15 @@ export class SessionService {
 
   // ─── Pool info ────────────────────────────────────────────────────────────────
   async getPoolInfo(clubId: string, leagueId: string) {
-    await this.verifyLeague(clubId, leagueId);
+    const league = await this.verifyLeague(clubId, leagueId);
+    const phaseId = this.activePhaseId(league);
+
+    const phaseFilter: any = phaseId ? { phaseId } : {};
 
     const [poolSize, completedCount, totalCount] = await Promise.all([
-      this.matchRepo.count({ where: { leagueId, sessionId: IsNull(), status: MatchStatus.PENDING } }),
-      this.matchRepo.count({ where: { leagueId, status: MatchStatus.COMPLETED } }),
-      this.matchRepo.count({ where: { leagueId } }),
+      this.matchRepo.count({ where: { leagueId, sessionId: IsNull(), status: MatchStatus.PENDING, ...phaseFilter } }),
+      this.matchRepo.count({ where: { leagueId, status: MatchStatus.COMPLETED, ...phaseFilter } }),
+      this.matchRepo.count({ where: { leagueId, ...phaseFilter } }),
     ]);
 
     return {

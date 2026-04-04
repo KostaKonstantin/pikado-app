@@ -11,17 +11,7 @@ import {
   Users, Loader2, ChevronRight,
 } from 'lucide-react';
 import Link from 'next/link';
-
-/* ─── pixel avatar ──────────────────────────────────────────────── */
-function PixelAvatar({ name, size = 'sm' }: { name?: string; size?: 'sm' | 'md' }) {
-  const src = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name || '?')}`;
-  const sz  = size === 'md' ? 'w-10 h-10 rounded-xl' : 'w-8 h-8 rounded-lg';
-  return (
-    <div className={`${sz} bg-slate-800 overflow-hidden shrink-0`}>
-      <img src={src} alt={name || '?'} className="w-full h-full object-cover scale-110" />
-    </div>
-  );
-}
+import { DartAvatar } from '@/components/ui/dart-avatar';
 
 /* ─── step indicator ─────────────────────────────────────────────── */
 function StepDots({ step, total }: { step: number; total: number }) {
@@ -225,8 +215,8 @@ export default function NewLeaguePage() {
                 <label className="block text-sm font-medium text-slate-300">Tip lige</label>
                 <div className="grid grid-cols-2 gap-2">
                   {[
-                    { value: 'round',   label: 'Kola',        desc: 'Ceo raspored unapred' },
-                    { value: 'session', label: 'Večeri',      desc: 'Fleksibilan raspored' },
+                    { value: 'round',   label: 'Kola',   desc: 'Ceo raspored unapred' },
+                    { value: 'session', label: 'Večeri', desc: 'Fleksibilan raspored' },
                   ].map((m) => (
                     <label key={m.value} className={`flex flex-col p-3.5 rounded-xl border cursor-pointer transition-all
                       ${form.mode === m.value
@@ -240,10 +230,35 @@ export default function NewLeaguePage() {
                     </label>
                   ))}
                 </div>
+
+                {/* EvroLiga — full-width option */}
+                <label className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all
+                  ${form.mode === 'euroleague'
+                    ? 'border-amber-500 bg-amber-500/8 shadow-sm shadow-amber-500/10'
+                    : 'border-slate-700 hover:border-slate-600 bg-slate-800/40'}`}
+                >
+                  <input type="radio" name="mode" value="euroleague" checked={form.mode === 'euroleague'}
+                    onChange={(e) => setForm({ ...form, mode: e.target.value })} className="sr-only" />
+                  <span className="text-lg leading-none mt-0.5">🏆</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-semibold text-white">EvroLiga</span>
+                    <span className="text-xs text-slate-400 mt-0.5 block">Višefazno takmičenje s regularnim delom, barážom, Top 10 i playoffom</span>
+                    {form.mode === 'euroleague' && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {['Regularni deo', 'Baraž (9–20)', 'Top 10', 'Playoff'].map((phase, i) => (
+                          <span key={phase} className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                            style={{ backgroundColor: 'rgba(245,158,11,0.12)', color: '#fbbf24' }}>
+                            {i + 1}. {phase}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </label>
               </div>
 
-              {/* Format */}
-              <div className="space-y-1.5">
+              {/* Format — hidden for euroleague (fixed single RR per phase) */}
+              <div className={`space-y-1.5 transition-all ${form.mode === 'euroleague' ? 'hidden' : ''}`}>
                 <label className="block text-sm font-medium text-slate-300">Format</label>
                 <div className="grid grid-cols-2 gap-2">
                   {[
@@ -264,8 +279,8 @@ export default function NewLeaguePage() {
                 </div>
               </div>
 
-              {/* Numeric settings */}
-              <div className="grid grid-cols-3 gap-3">
+              {/* Numeric settings — hidden for euroleague */}
+              <div className={`grid grid-cols-3 gap-3 ${form.mode === 'euroleague' ? 'hidden' : ''}`}>
                 {[
                   { label: 'Polaz. rez.', key: 'startingScore', type: 'select', options: [501, 301, 701] },
                   { label: 'Setova',      key: 'setsPerMatch',  min: 1, max: 9 },
@@ -296,7 +311,7 @@ export default function NewLeaguePage() {
                 ))}
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className={`grid grid-cols-3 gap-3 ${form.mode === 'euroleague' ? 'hidden' : ''}`}>
                 {[
                   { label: 'Bod. – Pobeda', key: 'pointsWin' },
                   { label: 'Bod. – Remi',   key: 'pointsDraw' },
@@ -393,7 +408,7 @@ export default function NewLeaguePage() {
                           ${isSel ? 'bg-orange-500/10' : 'hover:bg-slate-700/60'}
                         `}
                       >
-                        <PixelAvatar name={p.fullName} />
+                        <DartAvatar name={p.fullName} size="sm" />
                         <span className="flex-1 text-sm text-white truncate">{p.fullName}</span>
                         {isSel
                           ? <Check className="w-4 h-4 text-orange-400 shrink-0" />
@@ -436,7 +451,7 @@ export default function NewLeaguePage() {
                       key={p.id}
                       className="flex items-center gap-2 bg-orange-500/10 border border-orange-500/25 rounded-xl pl-1.5 pr-2 py-1 animate-scale-in"
                     >
-                      <PixelAvatar name={p.fullName} size="sm" />
+                      <DartAvatar name={p.fullName} size="sm" />
                       <span className="text-sm font-medium text-white">{p.fullName}</span>
                       <button
                         onClick={() => togglePlayer(p.id)}
@@ -512,7 +527,7 @@ export default function NewLeaguePage() {
                             : 'hover:bg-slate-800/60 hover:-translate-y-px'}
                         `}
                       >
-                        <PixelAvatar name={p.fullName} size="sm" />
+                        <DartAvatar name={p.fullName} size="sm" />
                         <span className="flex-1 text-sm font-medium text-white truncate">{p.fullName}</span>
                         <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 transition-all
                           ${isSel

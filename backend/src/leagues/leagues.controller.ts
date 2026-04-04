@@ -3,6 +3,7 @@ import {
 } from '@nestjs/common';
 import { LeaguesService } from './leagues.service';
 import { SessionService } from './session.service';
+import { EuroleagueService } from './euroleague.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { ClubMembershipGuard } from '../common/guards/club-membership.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -15,6 +16,7 @@ export class LeaguesController {
   constructor(
     private readonly leaguesService: LeaguesService,
     private readonly sessionService: SessionService,
+    private readonly euroleagueService: EuroleagueService,
   ) {}
 
   @Get()
@@ -146,8 +148,12 @@ export class LeaguesController {
   // ─── Sessions ──────────────────────────────────────────────────────────────
 
   @Get(':id/sessions')
-  getSessions(@Param('clubId') clubId: string, @Param('id') id: string) {
-    return this.sessionService.getSessions(clubId, id);
+  getSessions(
+    @Param('clubId') clubId: string,
+    @Param('id') id: string,
+    @Query('phaseId') phaseId?: string,
+  ) {
+    return this.sessionService.getSessions(clubId, id, phaseId);
   }
 
   @Get(':id/sessions/pool')
@@ -227,5 +233,63 @@ export class LeaguesController {
     @Body() body: { homePlayerId: string; awayPlayerId: string },
   ) {
     return this.sessionService.addManualMatch(clubId, id, sessionId, body.homePlayerId, body.awayPlayerId);
+  }
+
+  // ─── EvroLiga phases ────────────────────────────────────────────────────────
+
+  @Post(':id/euroleague/init')
+  @Roles(ClubRole.CLUB_ADMIN, ClubRole.ORGANIZER)
+  initPhases(@Param('clubId') clubId: string, @Param('id') id: string) {
+    return this.euroleagueService.initPhases(clubId, id);
+  }
+
+  @Get(':id/phases')
+  getPhases(@Param('clubId') clubId: string, @Param('id') id: string) {
+    return this.euroleagueService.getPhases(clubId, id);
+  }
+
+  @Get(':id/phases/:phaseId')
+  getPhase(
+    @Param('clubId') clubId: string,
+    @Param('id') id: string,
+    @Param('phaseId') phaseId: string,
+  ) {
+    return this.euroleagueService.getPhase(clubId, id, phaseId);
+  }
+
+  @Get(':id/phases/:phaseId/fixtures')
+  getPhaseFixtures(
+    @Param('clubId') clubId: string,
+    @Param('id') id: string,
+    @Param('phaseId') phaseId: string,
+  ) {
+    return this.euroleagueService.getPhaseFixtures(clubId, id, phaseId);
+  }
+
+  @Get(':id/phases/:phaseId/standings')
+  getPhaseStandings(
+    @Param('clubId') clubId: string,
+    @Param('id') id: string,
+    @Param('phaseId') phaseId: string,
+  ) {
+    return this.euroleagueService.getPhaseStandings(clubId, id, phaseId);
+  }
+
+  @Patch(':id/phases/:phaseId/matches/:matchId')
+  @Roles(ClubRole.CLUB_ADMIN, ClubRole.ORGANIZER)
+  updatePhaseMatch(
+    @Param('clubId') clubId: string,
+    @Param('id') id: string,
+    @Param('phaseId') phaseId: string,
+    @Param('matchId') matchId: string,
+    @Body() body: { homeSets: number; awaySets: number },
+  ) {
+    return this.euroleagueService.updatePhaseMatch(clubId, id, phaseId, matchId, body.homeSets, body.awaySets);
+  }
+
+  @Post(':id/phases/advance')
+  @Roles(ClubRole.CLUB_ADMIN, ClubRole.ORGANIZER)
+  advancePhase(@Param('clubId') clubId: string, @Param('id') id: string) {
+    return this.euroleagueService.advanceToNextPhase(clubId, id);
   }
 }

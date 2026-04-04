@@ -7,6 +7,28 @@ import { Match } from '../matches/entities/match.entity';
 import { LeagueMatch } from '../leagues/entities/league-match.entity';
 import { MatchStatus } from '../common/enums';
 
+const AVATAR_SEEDS = [
+  { dartType: 'classic', tipType: 'classic', flightType: 'standard', primaryColor: '#FF4D4D', secondaryColor: '#1A1A1A', pattern: 'solid'   },
+  { dartType: 'slim',    tipType: 'needle',  flightType: 'slim',     primaryColor: '#4DA6FF', secondaryColor: '#0A0A23', pattern: 'stripe'  },
+  { dartType: 'grip',    tipType: 'classic', flightType: 'kite',     primaryColor: '#4DFF88', secondaryColor: '#003322', pattern: 'split'   },
+  { dartType: 'pro',     tipType: 'needle',  flightType: 'pro',      primaryColor: '#FFD24D', secondaryColor: '#332200', pattern: 'diamond' },
+  { dartType: 'heavy',   tipType: 'heavy',   flightType: 'fantasy',  primaryColor: '#B84DFF', secondaryColor: '#220033', pattern: 'flame'   },
+  { dartType: 'classic', tipType: 'classic', flightType: 'kite',     primaryColor: '#FF8C42', secondaryColor: '#331A00', pattern: 'stripe'  },
+  { dartType: 'slim',    tipType: 'needle',  flightType: 'standard', primaryColor: '#2ED3B7', secondaryColor: '#003333', pattern: 'carbon'  },
+  { dartType: 'grip',    tipType: 'classic', flightType: 'fantasy',  primaryColor: '#FF4D4D', secondaryColor: '#000000', pattern: 'flame'   },
+  { dartType: 'pro',     tipType: 'needle',  flightType: 'slim',     primaryColor: '#4DA6FF', secondaryColor: '#111111', pattern: 'split'   },
+  { dartType: 'heavy',   tipType: 'heavy',   flightType: 'pro',      primaryColor: '#FFD24D', secondaryColor: '#1A1A1A', pattern: 'carbon'  },
+  { dartType: 'classic', tipType: 'classic', flightType: 'fantasy',  primaryColor: '#B84DFF', secondaryColor: '#0D001A', pattern: 'diamond' },
+  { dartType: 'slim',    tipType: 'needle',  flightType: 'kite',     primaryColor: '#2ED3B7', secondaryColor: '#001A1A', pattern: 'stripe'  },
+  { dartType: 'grip',    tipType: 'classic', flightType: 'standard', primaryColor: '#FF8C42', secondaryColor: '#1A0F00', pattern: 'solid'   },
+  { dartType: 'pro',     tipType: 'needle',  flightType: 'fantasy',  primaryColor: '#4DFF88', secondaryColor: '#001A0D', pattern: 'flame'   },
+  { dartType: 'heavy',   tipType: 'heavy',   flightType: 'kite',     primaryColor: '#FF4D4D', secondaryColor: '#330000', pattern: 'split'   },
+];
+
+function randomAvatarSeed() {
+  return AVATAR_SEEDS[Math.floor(Math.random() * AVATAR_SEEDS.length)];
+}
+
 @Injectable()
 export class PlayersService {
   constructor(
@@ -35,7 +57,8 @@ export class PlayersService {
   }
 
   async create(clubId: string, dto: CreatePlayerDto) {
-    const player = this.playerRepo.create({ ...dto, clubId });
+    const avatar = dto.avatar ?? randomAvatarSeed();
+    const player = this.playerRepo.create({ ...dto, clubId, avatar });
     return this.playerRepo.save(player);
   }
 

@@ -20,11 +20,11 @@ export class LeagueMatch {
   @Column({ name: 'league_id' })
   leagueId: string;
 
-  @Column({ name: 'home_player_id' })
-  homePlayerId: string;
+  @Column({ name: 'home_player_id', nullable: true })
+  homePlayerId: string | null;
 
-  @Column({ name: 'away_player_id' })
-  awayPlayerId: string;
+  @Column({ name: 'away_player_id', nullable: true })
+  awayPlayerId: string | null;
 
   @Column({ name: 'home_sets', default: 0 })
   homeSets: number;
@@ -38,8 +38,8 @@ export class LeagueMatch {
   @Column({ name: 'away_legs', default: 0 })
   awayLegs: number;
 
-  @Column({ name: 'winner_id', nullable: true })
-  winnerId: string;
+  @Column({ name: 'winner_id', type: 'varchar', nullable: true })
+  winnerId: string | null;
 
   @Column({ type: 'enum', enum: MatchStatus, default: MatchStatus.PENDING })
   status: MatchStatus;
@@ -66,13 +66,13 @@ export class LeagueMatch {
   @JoinColumn({ name: 'league_id' })
   league: League;
 
-  @ManyToOne(() => Player)
+  @ManyToOne(() => Player, { nullable: true })
   @JoinColumn({ name: 'home_player_id' })
-  homePlayer: Player;
+  homePlayer: Player | null;
 
-  @ManyToOne(() => Player)
+  @ManyToOne(() => Player, { nullable: true })
   @JoinColumn({ name: 'away_player_id' })
-  awayPlayer: Player;
+  awayPlayer: Player | null;
 
   @ManyToOne(() => Player, { nullable: true })
   @JoinColumn({ name: 'home_substitute_for_id' })
@@ -107,6 +107,14 @@ export class LeagueMatch {
   /** True if this match was newly created as a result of a substitution */
   @Column({ name: 'is_substitution_match', default: false })
   isSubstitutionMatch: boolean;
+
+  /** FK to CompetitionPhase — null for 'round' and 'session' leagues */
+  @Column({ name: 'phase_id', nullable: true, type: 'uuid' })
+  phaseId: string | null;
+
+  /** Playoff match role: 'semifinal_1' | 'semifinal_2' | 'final' | null */
+  @Column({ name: 'phase_match_type', type: 'varchar', nullable: true })
+  phaseMatchType: string | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

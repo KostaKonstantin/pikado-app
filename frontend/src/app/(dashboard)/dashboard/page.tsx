@@ -9,17 +9,7 @@ import {
   Zap, CheckCircle2, Clock,
 } from 'lucide-react';
 import Link from 'next/link';
-
-/* ─── pixel avatar (consistent with rest of app) ──────────────── */
-function MiniAvatar({ name, size = 'sm' }: { name?: string; size?: 'sm' | 'md' }) {
-  const src = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name || '?')}`;
-  const sz  = size === 'md' ? 'w-10 h-10 rounded-xl' : 'w-7 h-7 rounded-lg';
-  return (
-    <div className={`${sz} bg-slate-800 overflow-hidden shrink-0`}>
-      <img src={src} alt={name || '?'} className="w-full h-full object-cover scale-110" />
-    </div>
-  );
-}
+import { DartAvatar } from '@/components/ui/dart-avatar';
 
 /* ─── rank medal ────────────────────────────────────────────────── */
 function Medal({ pos }: { pos: number }) {
@@ -336,7 +326,7 @@ export default function DashboardPage() {
                       <span className={`text-sm font-medium truncate ${homeWon ? 'text-white' : 'text-slate-500'}`}>
                         {m.homePlayer?.fullName}
                       </span>
-                      <MiniAvatar name={m.homePlayer?.fullName} />
+                      <DartAvatar name={m.homePlayer?.fullName} size="sm" />
                     </div>
 
                     {/* score */}
@@ -351,7 +341,7 @@ export default function DashboardPage() {
 
                     {/* away */}
                     <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <MiniAvatar name={m.awayPlayer?.fullName} />
+                      <DartAvatar name={m.awayPlayer?.fullName} size="sm" />
                       <span className={`text-sm font-medium truncate ${awayWon ? 'text-white' : 'text-slate-500'}`}>
                         {m.awayPlayer?.fullName}
                       </span>
@@ -385,7 +375,7 @@ export default function DashboardPage() {
                   style={{ animationDelay: `${i * 60}ms` }}
                 >
                   <Medal pos={i + 1} />
-                  <MiniAvatar name={s.player?.fullName} size="md" />
+                  <DartAvatar name={s.player?.fullName} size="md" rank={i + 1} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-white truncate">{s.player?.fullName}</p>
                     <p className="text-xs text-slate-500">{s.played} meč. · {s.won}P {s.drawn}R {s.lost}G</p>
