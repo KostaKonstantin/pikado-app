@@ -12,34 +12,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-
-/* ─── helpers ──────────────────────────────────────────────────────── */
-function avatarRarity(name: string): 'common' | 'rare' | 'epic' | 'legendary' {
-  const h = Array.from(name || '').reduce((acc, c) => ((acc * 31) + c.charCodeAt(0)) & 0xffff, 7) % 100;
-  if (h >= 97) return 'legendary';
-  if (h >= 85) return 'epic';
-  if (h >= 60) return 'rare';
-  return 'common';
-}
-const RARITY_RING: Record<string, string> = {
-  legendary: 'ring-2 ring-yellow-400/80 shadow-lg shadow-yellow-400/30',
-  epic:      'ring-2 ring-violet-500/70 shadow-lg shadow-violet-500/20',
-  rare:      'ring-2 ring-blue-400/60',
-  common:    '',
-};
-function Avatar({ name, size = 'sm' }: { name?: string; size?: 'sm' | 'md' | 'lg' }) {
-  const seed = encodeURIComponent(name || '?');
-  const src = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${seed}`;
-  const rarity = avatarRarity(name || '');
-  const sz = size === 'lg' ? 'w-14 h-14' : size === 'md' ? 'w-10 h-10' : 'w-7 h-7';
-  const rounded = size === 'lg' ? 'rounded-2xl' : 'rounded-full';
-  return (
-    <div className={`relative ${sz} ${rounded} bg-slate-700 overflow-hidden shrink-0 ${RARITY_RING[rarity]}`}>
-      <img src={src} alt={name || '?'} className="w-full h-full object-cover scale-110" />
-      {rarity === 'legendary' && <div className="absolute inset-0 animate-shimmer pointer-events-none" />}
-    </div>
-  );
-}
+import { DartAvatar } from '@/components/ui/dart-avatar';
 
 function SkeletonDetail() {
   return (
@@ -237,7 +210,6 @@ export default function PlayerDetailPage() {
     } finally { setSaving(false); }
   };
 
-  const avatarSrc = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(player?.fullName || '?')}`;
 
   const chartData = stats ? [
     { name: 'Pobede', value: stats.wins,   color: '#22c55e' },
@@ -305,9 +277,7 @@ export default function PlayerDetailPage() {
         <div className="card p-6 animate-fade-in-up">
           {!editing ? (
             <div className="flex items-center gap-5">
-              <div className="w-20 h-20 rounded-2xl bg-slate-800 overflow-hidden shrink-0 ring-1 ring-slate-700">
-                <img src={avatarSrc} alt={player.fullName} className="w-full h-full object-cover scale-110" />
-              </div>
+              <DartAvatar name={player.fullName} size="xl" />
               <div className="flex-1 min-w-0">
                 <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{player.fullName}</h2>
                 {player.nickname && (
@@ -624,7 +594,7 @@ export default function PlayerDetailPage() {
                               className="w-full flex items-center gap-3 p-4 text-left transition-colors hover:bg-slate-700/20"
                               onClick={() => setExpandedOpp(isExpanded ? null : opp.opponent.playerId)}
                             >
-                              <Avatar name={oppName} size="md" />
+                              <DartAvatar name={oppName} size="md" />
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <span className="font-semibold text-sm truncate" style={{ color: 'var(--text-primary)' }}>

@@ -29,8 +29,8 @@ export class Player {
   @Column({ nullable: true })
   country: string;
 
-  @Column({ name: 'avatar_url', nullable: true })
-  avatarUrl: string;
+  @Column({ name: 'avatar', type: 'jsonb', nullable: true })
+  avatar: Record<string, any> | null;
 
   @Column({ name: 'is_active', default: true })
   isActive: boolean;

@@ -11,17 +11,7 @@ import {
   Users, Loader2, ChevronRight,
 } from 'lucide-react';
 import Link from 'next/link';
-
-/* ─── pixel avatar ──────────────────────────────────────────────── */
-function PixelAvatar({ name, size = 'sm' }: { name?: string; size?: 'sm' | 'md' }) {
-  const src = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name || '?')}`;
-  const sz  = size === 'md' ? 'w-10 h-10 rounded-xl' : 'w-8 h-8 rounded-lg';
-  return (
-    <div className={`${sz} bg-slate-800 overflow-hidden shrink-0`}>
-      <img src={src} alt={name || '?'} className="w-full h-full object-cover scale-110" />
-    </div>
-  );
-}
+import { DartAvatar } from '@/components/ui/dart-avatar';
 
 /* ─── step indicator ─────────────────────────────────────────────── */
 function StepDots({ step, total }: { step: number; total: number }) {
@@ -418,7 +408,7 @@ export default function NewLeaguePage() {
                           ${isSel ? 'bg-orange-500/10' : 'hover:bg-slate-700/60'}
                         `}
                       >
-                        <PixelAvatar name={p.fullName} />
+                        <DartAvatar name={p.fullName} size="sm" />
                         <span className="flex-1 text-sm text-white truncate">{p.fullName}</span>
                         {isSel
                           ? <Check className="w-4 h-4 text-orange-400 shrink-0" />
@@ -461,7 +451,7 @@ export default function NewLeaguePage() {
                       key={p.id}
                       className="flex items-center gap-2 bg-orange-500/10 border border-orange-500/25 rounded-xl pl-1.5 pr-2 py-1 animate-scale-in"
                     >
-                      <PixelAvatar name={p.fullName} size="sm" />
+                      <DartAvatar name={p.fullName} size="sm" />
                       <span className="text-sm font-medium text-white">{p.fullName}</span>
                       <button
                         onClick={() => togglePlayer(p.id)}
@@ -537,7 +527,7 @@ export default function NewLeaguePage() {
                             : 'hover:bg-slate-800/60 hover:-translate-y-px'}
                         `}
                       >
-                        <PixelAvatar name={p.fullName} size="sm" />
+                        <DartAvatar name={p.fullName} size="sm" />
                         <span className="flex-1 text-sm font-medium text-white truncate">{p.fullName}</span>
                         <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 transition-all
                           ${isSel

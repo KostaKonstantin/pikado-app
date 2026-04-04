@@ -148,8 +148,12 @@ export class LeaguesController {
   // ─── Sessions ──────────────────────────────────────────────────────────────
 
   @Get(':id/sessions')
-  getSessions(@Param('clubId') clubId: string, @Param('id') id: string) {
-    return this.sessionService.getSessions(clubId, id);
+  getSessions(
+    @Param('clubId') clubId: string,
+    @Param('id') id: string,
+    @Query('phaseId') phaseId?: string,
+  ) {
+    return this.sessionService.getSessions(clubId, id, phaseId);
   }
 
   @Get(':id/sessions/pool')

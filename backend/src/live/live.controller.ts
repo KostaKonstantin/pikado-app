@@ -76,8 +76,8 @@ export class LiveController {
 
     const h2hPoints = new Map<string, number>();
     for (const m of matches) {
-      const home = statsMap.get(m.homePlayerId);
-      const away = statsMap.get(m.awayPlayerId);
+      const home = statsMap.get(m.homePlayerId!);
+      const away = statsMap.get(m.awayPlayerId!);
       if (!home || !away) continue;
       home.played++; away.played++;
       home.setsFor += m.homeSets; home.setsAgainst += m.awaySets;

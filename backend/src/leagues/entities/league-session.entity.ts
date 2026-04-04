@@ -28,6 +28,10 @@ export class LeagueSession {
   @Column({ default: 'open' })
   status: string;
 
+  /** FK to CompetitionPhase — set for EvroLiga sessions, null for regular session-mode leagues */
+  @Column({ name: 'phase_id', type: 'varchar', nullable: true })
+  phaseId: string | null;
+
   /** IDs of players who are present this evening */
   @Column({ name: 'present_player_ids', type: 'jsonb', default: '[]' })
   presentPlayerIds: string[];

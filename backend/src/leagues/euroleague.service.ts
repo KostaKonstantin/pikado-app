@@ -8,9 +8,6 @@ import { League } from './entities/league.entity';
 import { MatchStatus, LeagueStatus } from '../common/enums';
 import { FixtureService } from './fixture.service';
 
-// Placeholder used in the Final match record before both SFs complete
-export const TBD_PLAYER_ID = '00000000-0000-0000-0000-000000000001';
-
 // Phase order constants
 const PHASE_REGULAR  = 1;
 const PHASE_BARAZ    = 2;
@@ -141,8 +138,8 @@ export class EuroleagueService {
     }
 
     for (const m of matches) {
-      const home = map.get(m.homePlayerId);
-      const away = map.get(m.awayPlayerId);
+      const home = map.get(m.homePlayerId!);
+      const away = map.get(m.awayPlayerId!);
       if (!home || !away) continue;
 
       home.played++; away.played++;
@@ -194,11 +191,11 @@ export class EuroleagueService {
     let status = MatchStatus.COMPLETED;
 
     if (phase.type === 'knockout') {
-      // Playoff: need majority of sets (e.g. 2/3) — use league.setsPerMatch as best-of
-      const setsToWin = Math.ceil((league.setsPerMatch || 3) / 2);
-      if (homeSets >= setsToWin)      winnerId = match.homePlayerId;
-      else if (awaySets >= setsToWin) winnerId = match.awayPlayerId;
-      else                             status   = MatchStatus.IN_PROGRESS;
+      // Playoff format: first to 2 sets wins (best of 3 — possible scores: 2:0, 2:1)
+      const PLAYOFF_SETS_TO_WIN = 2;
+      if (homeSets >= PLAYOFF_SETS_TO_WIN)      winnerId = match.homePlayerId;
+      else if (awaySets >= PLAYOFF_SETS_TO_WIN) winnerId = match.awayPlayerId;
+      else                                       status   = MatchStatus.IN_PROGRESS;
     } else {
       // Round-robin: direct set comparison (draw possible)
       if (homeSets > awaySets)      winnerId = match.homePlayerId;
@@ -224,16 +221,32 @@ export class EuroleagueService {
   ) {
     if (!completedMatch.phaseMatchType?.startsWith('semifinal')) return;
 
-    const finalMatch = await this.matchRepo.findOne({
-      where: { leagueId, phaseId, phaseMatchType: 'final' },
-    });
-    if (!finalMatch) return;
+    const loserId =
+      completedMatch.homePlayerId === winnerId
+        ? completedMatch.awayPlayerId
+        : completedMatch.homePlayerId;
 
+    // Advance winner → Final; loser → Third-place match
     // SF1 (matchOrder=0) → home slot; SF2 (matchOrder=1) → away slot
-    if (completedMatch.matchOrder === 0) {
-      await this.matchRepo.update(finalMatch.id, { homePlayerId: winnerId });
-    } else {
-      await this.matchRepo.update(finalMatch.id, { awayPlayerId: winnerId });
+    const [finalMatch, thirdPlaceMatch] = await Promise.all([
+      this.matchRepo.findOne({ where: { leagueId, phaseId, phaseMatchType: 'final' } }),
+      this.matchRepo.findOne({ where: { leagueId, phaseId, phaseMatchType: 'third_place' } }),
+    ]);
+
+    if (finalMatch) {
+      if (completedMatch.matchOrder === 0) {
+        await this.matchRepo.update(finalMatch.id, { homePlayerId: winnerId });
+      } else {
+        await this.matchRepo.update(finalMatch.id, { awayPlayerId: winnerId });
+      }
+    }
+
+    if (thirdPlaceMatch) {
+      if (completedMatch.matchOrder === 0) {
+        await this.matchRepo.update(thirdPlaceMatch.id, { homePlayerId: loserId });
+      } else {
+        await this.matchRepo.update(thirdPlaceMatch.id, { awayPlayerId: loserId });
+      }
     }
   }
 
@@ -302,13 +315,22 @@ export class EuroleagueService {
         phaseMatchType: 'semifinal_2',
       }));
 
-      // Final: placeholder players filled after SFs complete
+      // Final: placeholder players filled after SFs complete (null = TBD)
       await this.matchRepo.save(this.matchRepo.create({
         leagueId, phaseId: nextPhase.id,
-        homePlayerId: TBD_PLAYER_ID, awayPlayerId: TBD_PLAYER_ID,
+        homePlayerId: null, awayPlayerId: null,
         roundNumber: 2, sessionNumber: 2, matchOrder: 2,
         status: MatchStatus.PENDING, homeSets: 0, awaySets: 0, homeLegs: 0, awayLegs: 0,
         phaseMatchType: 'final',
+      }));
+
+      // Third-place match: loser of SF1 vs loser of SF2 (null = TBD)
+      await this.matchRepo.save(this.matchRepo.create({
+        leagueId, phaseId: nextPhase.id,
+        homePlayerId: null, awayPlayerId: null,
+        roundNumber: 2, sessionNumber: 2, matchOrder: 3,
+        status: MatchStatus.PENDING, homeSets: 0, awaySets: 0, homeLegs: 0, awayLegs: 0,
+        phaseMatchType: 'third_place',
       }));
     }
 

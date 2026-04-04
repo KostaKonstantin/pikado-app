@@ -19,48 +19,15 @@ import {
   MoreHorizontal, Grid3x3, Loader2,
 } from 'lucide-react';
 import QRCodeSVG from 'react-qr-code';
+import { DartAvatar } from '@/components/ui/dart-avatar';
 
 type Tab = 'tabela' | 'raspored' | 'odlozeni' | 'igraci' | 'matrica';
 
 /* ─── helpers ──────────────────────────────────────────────────────── */
 
-function avatarRarity(name: string): 'common' | 'rare' | 'epic' | 'legendary' {
-  const h = Array.from(name || '').reduce((acc, c) => ((acc * 31) + c.charCodeAt(0)) & 0xffff, 7) % 100;
-  if (h >= 97) return 'legendary';
-  if (h >= 85) return 'epic';
-  if (h >= 60) return 'rare';
-  return 'common';
-}
-
-const RARITY_RING: Record<string, string> = {
-  legendary: 'ring-2 ring-yellow-400/80 shadow-lg shadow-yellow-400/30',
-  epic:      'ring-2 ring-violet-500/70 shadow-lg shadow-violet-500/20',
-  rare:      'ring-2 ring-blue-400/60',
-  common:    '',
-};
-
-function Avatar({ name, size = 'sm' }: { name?: string; size?: 'sm' | 'md' | 'lg' }) {
-  const seed = encodeURIComponent(name || '?');
-  const src  = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${seed}`;
-  const rarity = avatarRarity(name || '');
-  const sz =
-    size === 'lg' ? 'w-14 h-14' :
-    size === 'md' ? 'w-10 h-10' :
-                   'w-7 h-7';
-  const rounded = size === 'lg' ? 'rounded-2xl' : 'rounded-full';
-
-  return (
-    <div className={`relative ${sz} ${rounded} bg-slate-700 overflow-hidden shrink-0 ${RARITY_RING[rarity]}`}>
-      <img
-        src={src}
-        alt={name || '?'}
-        className={`w-full h-full object-cover transition-transform duration-200 hover:scale-110 ${size === 'lg' ? 'scale-110' : ''}`}
-      />
-      {rarity === 'legendary' && (
-        <div className="absolute inset-0 animate-shimmer pointer-events-none" />
-      )}
-    </div>
-  );
+/** Local Avatar shim */
+function Avatar({ name, size = 'sm', winRate, rank }: { name?: string; player?: any; size?: 'sm' | 'md' | 'lg'; winRate?: number; rank?: number }) {
+  return <DartAvatar name={name} size={size === 'lg' ? 'lg' : size === 'md' ? 'md' : 'sm'} winRate={winRate} rank={rank} />;
 }
 
 function RankBadge({ pos }: { pos: number }) {
@@ -132,7 +99,7 @@ function PlayerCombobox({
         className="input-field w-full text-sm text-left flex items-center justify-between gap-2 min-h-[44px]"
       >
         <div className="flex items-center gap-2 min-w-0">
-          {selectedPlayer && <Avatar name={selectedPlayer.player?.fullName} size="sm" />}
+          {selectedPlayer && <Avatar name={selectedPlayer.player?.fullName} player={selectedPlayer.player} size="sm" />}
           <span className={`truncate ${selectedPlayer ? 'text-white' : 'text-slate-500'}`}>
             {selectedPlayer ? selectedPlayer.player?.fullName : placeholder}
           </span>
@@ -191,7 +158,7 @@ function PlayerCombobox({
                   : 'text-slate-200 active:bg-slate-700 hover:bg-slate-800'
               }`}
             >
-              <Avatar name={lp.player?.fullName} size="sm" />
+              <Avatar name={lp.player?.fullName} player={lp.player} size="sm" />
               <span className="truncate font-medium">{lp.player?.fullName}</span>
             </button>
           ))
@@ -280,7 +247,7 @@ export default function LeagueDetailPage() {
   const [phaseStandings,   setPhaseStandings]   = useState<any[]>([]);
   const [phaseLoading,     setPhaseLoading]     = useState(false);
   const [advancingPhase,   setAdvancingPhase]   = useState(false);
-  const [phaseTab,         setPhaseTab]         = useState<'tabela' | 'raspored' | 'bracket'>('tabela');
+  const [phaseTab,         setPhaseTab]         = useState<'tabela' | 'raspored' | 'bracket' | 'igraci'>('tabela');
   const [phaseMatchModal,  setPhaseMatchModal]  = useState<any | null>(null);
   const [phaseHomeScore,   setPhaseHomeScore]   = useState(0);
   const [phaseAwayScore,   setPhaseAwayScore]   = useState(0);
@@ -379,9 +346,9 @@ export default function LeagueDetailPage() {
       });
       setNewSessionOpen(false);
       setSessionPreview(null);
-      // Auto-expand the newly created session
       setExpandedSessions((prev) => new Set([...prev, newSession.id]));
       await load();
+      if (activePhaseView) await loadPhaseData(activePhaseView);
     } catch (e: any) {
       alert(e?.response?.data?.message ?? 'Greška pri kreiranju sesije');
     } finally { setCreatingSession(false); }
@@ -393,6 +360,7 @@ export default function LeagueDetailPage() {
     try {
       await leaguesApi.closeSession(club.id, id, sessionId);
       await load();
+      if (activePhaseView) await loadPhaseData(activePhaseView);
     } finally { setClosingSession(null); }
   };
 
@@ -403,6 +371,7 @@ export default function LeagueDetailPage() {
     try {
       await leaguesApi.deleteSession(club.id, id, sessionId);
       await load();
+      if (activePhaseView) await loadPhaseData(activePhaseView);
     } finally { setDeletingSession(null); }
   };
 
@@ -605,12 +574,14 @@ export default function LeagueDetailPage() {
     if (!club?.id) return;
     setPhaseLoading(true);
     try {
-      const [fx, st] = await Promise.all([
+      const [fx, st, sess] = await Promise.all([
         leaguesApi.getPhaseFixtures(club.id, id, phaseId),
         leaguesApi.getPhaseStandings(club.id, id, phaseId),
+        leaguesApi.getSessions(club.id, id, phaseId),
       ]);
       setPhaseFixtures(fx);
       setPhaseStandings(st);
+      setSessions(sess);
     } finally { setPhaseLoading(false); }
   };
 
@@ -792,13 +763,15 @@ export default function LeagueDetailPage() {
   /* ── TABS ────────────────────────────────────────────────── */
   const postponedMatches = fixtures.filter((m: any) => m.isPostponed && m.status !== 'completed');
 
-  const TABS: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = [
-    { id: 'tabela',   label: 'Tabela',   icon: <BarChart3  className="w-3.5 h-3.5" /> },
-    { id: 'raspored', label: 'Raspored', icon: <Calendar   className="w-3.5 h-3.5" /> },
-    ...(!isSessionMode ? [{ id: 'odlozeni' as Tab, label: 'Odloženi', icon: <AlertCircle className="w-3.5 h-3.5" />, badge: postponedMatches.length }] : []),
-    { id: 'igraci',   label: 'Igrači',   icon: <Users      className="w-3.5 h-3.5" /> },
-    { id: 'matrica',  label: 'Matrica',  icon: <Grid3x3    className="w-3.5 h-3.5" /> },
-  ];
+  const TABS: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = isEuroleague
+    ? []
+    : [
+        { id: 'tabela',   label: 'Tabela',   icon: <BarChart3  className="w-3.5 h-3.5" /> },
+        { id: 'raspored', label: 'Raspored', icon: <Calendar   className="w-3.5 h-3.5" /> },
+        ...(!isSessionMode ? [{ id: 'odlozeni' as Tab, label: 'Odloženi', icon: <AlertCircle className="w-3.5 h-3.5" />, badge: postponedMatches.length }] : []),
+        { id: 'igraci',   label: 'Igrači',   icon: <Users      className="w-3.5 h-3.5" /> },
+        { id: 'matrica',  label: 'Matrica',  icon: <Grid3x3    className="w-3.5 h-3.5" /> },
+      ];
 
   /* ── render ──────────────────────────────────────────────── */
   if (loading) return (
@@ -856,8 +829,8 @@ export default function LeagueDetailPage() {
           </div>
         )}
 
-        {/* Tab bar */}
-        <div className="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0 pb-0.5">
+        {/* Tab bar — hidden for EvroLiga (uses internal phase sub-tabs instead) */}
+        {TABS.length > 0 && <div className="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0 pb-0.5">
           <div className="flex gap-1 bg-slate-800 rounded-xl p-1 w-fit min-w-max">
             {TABS.map((t) => (
               <button
@@ -879,7 +852,7 @@ export default function LeagueDetailPage() {
               </button>
             ))}
           </div>
-        </div>
+        </div>}
 
         {/* ══════════════════ TABELA ══════════════════════════ */}
         {tab === 'tabela' && !isEuroleague && (
@@ -976,7 +949,7 @@ export default function LeagueDetailPage() {
                         }}
                       >
                         <span className="text-xl sm:text-2xl leading-none">{medalEmoji(s.position)}</span>
-                        <Avatar name={s.player?.fullName} size="lg" />
+                        <Avatar name={s.player?.fullName} player={s.player} size="lg" winRate={winRate(s)} rank={s.position} />
                         <div className="text-center min-w-0 w-full">
                           <p className="text-xs sm:text-sm font-bold text-white truncate leading-tight">
                             {s.player?.fullName?.split(' ')[0]}
@@ -1086,7 +1059,7 @@ export default function LeagueDetailPage() {
                               </td>
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-2.5">
-                                  <Avatar name={s.player?.fullName} />
+                                  <Avatar name={s.player?.fullName} player={s.player} winRate={winRate(s)} rank={s.position} />
                                   <div className="min-w-0">
                                     <div className="flex items-center gap-1.5">
                                       <span className="font-semibold text-white text-sm truncate">{s.player?.fullName}</span>
@@ -1136,7 +1109,7 @@ export default function LeagueDetailPage() {
                         >
                           <div className="flex items-center gap-3">
                             <RankBadge pos={s.position} />
-                            <Avatar name={s.player?.fullName} />
+                            <Avatar name={s.player?.fullName} player={s.player} />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-1.5">
                                 <span className="font-semibold text-white text-sm truncate">{s.player?.fullName}</span>
@@ -2034,7 +2007,7 @@ export default function LeagueDetailPage() {
         )}
 
         {/* ══════════════════ IGRAČI — DIRECTORY ══════════════════ */}
-        {tab === 'igraci' && !isEuroleague && (() => {
+        {tab === 'igraci' && (() => {
           // ── helpers ─────────────────────────────────────────────
           const getForm = (playerId: string): ('W' | 'L' | 'D')[] => {
             const done = fixtures
@@ -2255,7 +2228,7 @@ export default function LeagueDetailPage() {
                         )}
 
                         {/* Pixel avatar */}
-                        <Avatar name={lp.player?.fullName} size="lg" />
+                        <Avatar name={lp.player?.fullName} player={lp.player} size="lg" />
 
                         {/* Name + simple stats */}
                         <div className="w-full min-w-0">
@@ -2563,7 +2536,7 @@ export default function LeagueDetailPage() {
                     }`}>
                       {present && <CheckCircle2 className="w-3 h-3 text-white" />}
                     </div>
-                    <Avatar name={lp.player?.fullName} size="sm" />
+                    <Avatar name={lp.player?.fullName} player={lp.player} size="sm" />
                     <span className="text-sm text-white font-medium flex-1">{lp.player?.fullName}</span>
                   </label>
                 );
@@ -2846,6 +2819,110 @@ export default function LeagueDetailPage() {
         );
       })()}
 
+      {/* ══ MODAL: EvroLiga — Unesi Rezultat ══════════════════ */}
+      {phaseMatchModal && (() => {
+        const m = phaseMatchModal;
+        const isKnockout = ['semifinal_1', 'semifinal_2', 'final', 'third_place'].includes(m.phaseMatchType);
+        // Knockout (playoff): best-of-3 sets, first to 2 wins → max entry is 2
+        const max = isKnockout ? 2 : (league.setsPerMatch === 1 ? league.legsPerSet : (league.setsPerMatch || 3));
+        const homeLeading = phaseHomeScore > phaseAwayScore && (phaseHomeScore > 0 || phaseAwayScore > 0);
+        const awayLeading = phaseAwayScore > phaseHomeScore && (phaseHomeScore > 0 || phaseAwayScore > 0);
+        const scoreError = (() => {
+          const h = phaseHomeScore, a = phaseAwayScore;
+          if (h < 0 || a < 0) return 'Rezultat ne može biti negativan';
+          if (h > max || a > max) return `Maksimum je ${max}`;
+          if (h === 0 && a === 0) return 'Rezultat ne može biti 0:0';
+          if (isKnockout) {
+            // Valid playoff scores: 2:0, 2:1, 0:2, 1:2
+            const winner = h === 2 || a === 2;
+            const valid  = winner && h !== a;
+            if (!valid) return 'Playoff: pobednik mora da osvoji 2 seta (2:0 ili 2:1)';
+            return null;
+          }
+          const minScore = Math.min(h, a);
+          const maxScore = Math.max(h, a);
+          const decisive = maxScore === max && minScore < max - 1;
+          const draw = h === a && h === max - 1;
+          if (!decisive && !draw) return `Pobeda: ${max}:0 — ${max}:${max - 2} | Remi: ${max - 1}:${max - 1}`;
+          return null;
+        })();
+
+        const PhaseScoreCard = ({ side, label, name, score, leading }: { side: 'home' | 'away'; label: string; name: string; score: number; leading: boolean }) => (
+          <div className="flex-1 flex flex-col items-center gap-3 rounded-2xl p-4 transition-all duration-200"
+            style={{ backgroundColor: leading ? 'rgba(34,197,94,0.06)' : 'var(--bg-secondary)', border: leading ? '1px solid rgba(34,197,94,0.30)' : '1px solid var(--border)', boxShadow: leading ? '0 0 16px rgba(34,197,94,0.07)' : 'none' }}>
+            <div className="text-center">
+              <p className="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style={{ color: 'var(--text-secondary)' }}>{label}</p>
+              <p className="text-sm font-bold leading-tight text-white truncate max-w-[110px]">{name}</p>
+              {leading && <p className="text-[10px] text-green-400 font-semibold mt-0.5 animate-fade-in">● Vodi</p>}
+            </div>
+            <div className="w-20 h-20 rounded-2xl flex items-center justify-center"
+              style={{ backgroundColor: leading ? 'rgba(34,197,94,0.10)' : 'rgba(30,41,59,0.60)', border: leading ? '1px solid rgba(34,197,94,0.25)' : '1px solid rgba(51,65,85,0.6)' }}>
+              <span key={score} className="text-5xl font-black tabular-nums leading-none animate-score-pop" style={{ color: leading ? '#4ade80' : 'white' }}>{score}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <button onClick={() => side === 'home' ? setPhaseHomeScore(Math.max(0, phaseHomeScore - 1)) : setPhaseAwayScore(Math.max(0, phaseAwayScore - 1))}
+                disabled={score <= 0} className="w-10 h-10 rounded-xl flex items-center justify-center text-xl font-bold transition-all active:scale-90 disabled:opacity-25"
+                style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>−</button>
+              <button onClick={() => side === 'home' ? setPhaseHomeScore(Math.min(max, phaseHomeScore + 1)) : setPhaseAwayScore(Math.min(max, phaseAwayScore + 1))}
+                disabled={score >= max} className="w-10 h-10 rounded-xl flex items-center justify-center text-xl font-bold transition-all active:scale-90 disabled:opacity-25 bg-orange-500/15 text-orange-400 hover:bg-orange-500/25"
+                style={{ border: '1px solid rgba(249,115,22,0.25)' }}>+</button>
+            </div>
+          </div>
+        );
+
+        return (
+          <Modal onClose={() => setPhaseMatchModal(null)}>
+            <div className="flex items-start justify-between mb-1">
+              <div>
+                <h3 className="font-bold text-white flex items-center gap-2">
+                  <Target className="w-4 h-4 text-orange-400 shrink-0" />
+                  {m.status === 'completed' ? 'Ispravi Rezultat' : 'Unos Rezultata'}
+                </h3>
+                <p className="text-xs mt-0.5 truncate max-w-[220px]" style={{ color: 'var(--text-secondary)' }}>
+                  {m.homePlayer?.fullName} <span className="opacity-40">vs</span> {m.awayPlayer?.fullName}
+                </p>
+              </div>
+              <button onClick={() => setPhaseMatchModal(null)} className="p-1.5 text-slate-400 hover:text-white rounded-lg transition-colors shrink-0 ml-2">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex items-center gap-3 my-5">
+              <PhaseScoreCard side="home" label="Domaćin" name={m.homePlayer?.fullName} score={phaseHomeScore} leading={homeLeading} />
+              <div className="flex flex-col items-center gap-1 shrink-0">
+                <span className="text-2xl font-thin text-slate-600">:</span>
+                <span className="text-[10px] text-slate-600 font-medium">{isKnockout ? 'setova' : `max ${max}`}</span>
+                {isKnockout && <span className="text-[9px] text-slate-700 font-medium">2:0 ili 2:1</span>}
+              </div>
+              <PhaseScoreCard side="away" label="Gost" name={m.awayPlayer?.fullName} score={phaseAwayScore} leading={awayLeading} />
+            </div>
+            {scoreError && (
+              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl mb-1 animate-shake animate-fade-in text-sm"
+                style={{ backgroundColor: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.20)', color: '#f87171' }}>
+                <AlertCircle className="w-4 h-4 shrink-0" /><span>{scoreError}</span>
+              </div>
+            )}
+            <div className="flex flex-col gap-2 mt-4">
+              <button
+                onClick={async () => {
+                  if (scoreError || !club?.id || !m.phaseId) return;
+                  setPhaseSaveLoading(true);
+                  try {
+                    await leaguesApi.updatePhaseMatch(club.id, id, m.phaseId, m.id, phaseHomeScore, phaseAwayScore);
+                    setPhaseMatchModal(null);
+                    await loadPhaseData(activePhaseView);
+                  } finally { setPhaseSaveLoading(false); }
+                }}
+                disabled={!!scoreError || phaseSaveLoading}
+                className="btn-primary w-full justify-center py-3 text-sm font-semibold disabled:opacity-40 active:scale-[0.98] transition-transform"
+              >
+                {phaseSaveLoading ? <><Loader2 className="w-4 h-4 animate-spin" /> Čuvanje...</> : <><Check className="w-4 h-4" /> Sačuvaj rezultat</>}
+              </button>
+              <button onClick={() => setPhaseMatchModal(null)} className="btn-secondary w-full justify-center py-2.5 text-sm">Otkaži</button>
+            </div>
+          </Modal>
+        );
+      })()}
+
       {/* ══ MODAL: Unesi Rezultat ══════════════════════════════ */}
       {editMatch && (
         <Modal onClose={() => setEditMatch(null)}>
@@ -3043,7 +3120,6 @@ export default function LeagueDetailPage() {
         const { completed, remaining } = getPlayerMatches(selectedPlayer.playerId);
         const standing = standings.find((s: any) => s.player?.id === selectedPlayer.playerId);
         const name     = selectedPlayer.player?.fullName ?? '';
-        const rarity   = avatarRarity(name);
 
         /* form: last 5 completed in reverse order */
         const recentForm = [...completed].slice(-5).reverse();
@@ -3065,16 +3141,7 @@ export default function LeagueDetailPage() {
             <div className="flex items-start justify-between mb-5">
               <div className="flex items-center gap-3.5">
                 {/* avatar */}
-                <div className={`relative w-16 h-16 rounded-2xl bg-slate-700 overflow-hidden shrink-0 ${RARITY_RING[rarity]}`}>
-                  <img
-                    src={`https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name)}`}
-                    alt={name}
-                    className="w-full h-full object-cover scale-110"
-                  />
-                  {rarity === 'legendary' && (
-                    <div className="absolute inset-0 animate-shimmer pointer-events-none" />
-                  )}
-                </div>
+                <DartAvatar name={name} size="lg" />
 
                 {/* identity */}
                 <div>
@@ -3219,7 +3286,7 @@ export default function LeagueDetailPage() {
                           ${oppLp ? 'bg-slate-700/80 text-slate-300 hover:bg-slate-600 hover:text-white active:scale-95' : 'bg-slate-800 text-slate-500 cursor-default'}
                         `}
                       >
-                        <Avatar name={oppName} size="sm" />
+                        <Avatar name={oppName} player={oppLp?.player} size="sm" />
                         {oppName}
                       </button>
                     );
@@ -3233,7 +3300,9 @@ export default function LeagueDetailPage() {
       })()}
 
       {/* ══════════════════ EVROLIGA ══════════════════════════════ */}
-      {isEuroleague && (() => {
+      {isEuroleague && (
+        <div className="px-4 md:px-6 pb-6">
+          {(() => {
         const TBD_ID = '00000000-0000-0000-0000-000000000001';
         const activePhase = phases.find((p: any) => p.id === activePhaseView);
         const isPlayoff   = activePhase?.type === 'knockout';
@@ -3253,9 +3322,10 @@ export default function LeagueDetailPage() {
         }
 
         /* ── playoff matches ── */
-        const sf1    = phaseFixtures.find((m: any) => m.phaseMatchType === 'semifinal_1');
-        const sf2    = phaseFixtures.find((m: any) => m.phaseMatchType === 'semifinal_2');
-        const final  = phaseFixtures.find((m: any) => m.phaseMatchType === 'final');
+        const sf1         = phaseFixtures.find((m: any) => m.phaseMatchType === 'semifinal_1');
+        const sf2         = phaseFixtures.find((m: any) => m.phaseMatchType === 'semifinal_2');
+        const final       = phaseFixtures.find((m: any) => m.phaseMatchType === 'final');
+        const thirdPlace  = phaseFixtures.find((m: any) => m.phaseMatchType === 'third_place');
 
         /* ── PlayoffCard ── */
         const PlayoffCard = ({ match, label }: { match: any; label: string }) => {
@@ -3264,19 +3334,40 @@ export default function LeagueDetailPage() {
               {label}
             </div>
           );
-          const isTBD    = match.homePlayerId === TBD_ID || match.awayPlayerId === TBD_ID;
+
+          // Each slot checked independently — show known player even if the other is still TBD
+          const homeTBD  = !match.homePlayerId || match.homePlayerId === TBD_ID || !match.homePlayer;
+          const awayTBD  = !match.awayPlayerId || match.awayPlayerId === TBD_ID || !match.awayPlayer;
+          const anyTBD   = homeTBD || awayTBD;
           const done     = match.status === 'completed';
           const homeWon  = done && match.winnerId === match.homePlayerId;
           const awayWon  = done && match.winnerId === match.awayPlayerId;
           const home     = match.homePlayer;
           const away     = match.awayPlayer;
+          const canClick = canEdit && !anyTBD && !done;
+
+          const PlayerSlot = ({ player, tbd, won, lost, sets }: { player: any; tbd: boolean; won: boolean; lost: boolean; sets?: number }) => (
+            <div className={`flex items-center gap-2.5 transition-opacity ${lost ? 'opacity-35' : ''}`}>
+              {!tbd ? (
+                <Avatar name={player?.fullName} player={player} size="sm" />
+              ) : (
+                <div className="w-7 h-7 rounded-full border border-dashed border-slate-600 shrink-0 flex items-center justify-center text-slate-600 text-xs">?</div>
+              )}
+              <span className={`flex-1 text-sm truncate ${won ? 'font-bold' : 'font-medium'} ${tbd ? 'italic' : ''}`}
+                style={{ color: won ? '#f97316' : tbd ? 'var(--text-secondary)' : 'var(--text-primary)' }}>
+                {tbd ? 'TBD' : (player?.fullName || '—')}
+              </span>
+              {done && sets !== undefined && <span className={`text-xl font-black tabular-nums ${won ? 'text-white' : 'text-slate-500'}`}>{sets}</span>}
+              {won && <span className="text-orange-400 text-xs">🏆</span>}
+            </div>
+          );
 
           return (
             <button
-              onClick={() => { if (canEdit && !isTBD) { setPhaseMatchModal(match); setPhaseHomeScore(match.homeSets ?? 0); setPhaseAwayScore(match.awaySets ?? 0); } }}
+              onClick={() => { if (canClick) { setPhaseMatchModal(match); setPhaseHomeScore(match.homeSets ?? 0); setPhaseAwayScore(match.awaySets ?? 0); } }}
               className={`w-full rounded-2xl border text-left transition-all duration-200 overflow-hidden
-                ${done ? 'border-slate-700' : 'border-slate-600 hover:-translate-y-0.5 hover:brightness-110 active:scale-[0.97]'}
-                ${canEdit && !isTBD && !done ? 'cursor-pointer' : 'cursor-default'}`}
+                ${done ? 'border-slate-700' : anyTBD ? 'border-slate-700/50' : 'border-slate-600 hover:-translate-y-0.5 hover:brightness-110 active:scale-[0.97]'}
+                ${canClick ? 'cursor-pointer' : 'cursor-default'}`}
               style={{ backgroundColor: 'var(--bg-secondary)' }}
             >
               {/* Label bar */}
@@ -3285,291 +3376,1152 @@ export default function LeagueDetailPage() {
                 {label}
               </div>
               <div className="px-4 py-3 space-y-2">
-                {/* Home player */}
-                <div className={`flex items-center gap-2.5 transition-opacity ${awayWon ? 'opacity-35' : ''}`}>
-                  {home && !isTBD ? (
-                    <Avatar name={home.fullName} size="sm" />
-                  ) : (
-                    <div className="w-7 h-7 rounded-full bg-slate-700 shrink-0 flex items-center justify-center text-slate-500 text-xs">?</div>
-                  )}
-                  <span className={`flex-1 text-sm truncate ${homeWon ? 'font-bold text-white' : 'font-medium'}`}
-                    style={{ color: homeWon ? '#f97316' : 'var(--text-primary)' }}>
-                    {isTBD ? 'TBD' : (home?.fullName || '—')}
-                  </span>
-                  {done && <span className={`text-xl font-black tabular-nums ${homeWon ? 'text-white' : 'text-slate-500'}`}>{match.homeSets}</span>}
-                  {homeWon && <span className="text-orange-400 text-xs font-bold">🏆</span>}
-                </div>
-                {/* Divider + VS */}
+                <PlayerSlot player={home} tbd={homeTBD} won={homeWon} lost={awayWon} sets={done ? match.homeSets : undefined} />
                 <div className="flex items-center gap-2">
                   <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
-                  <span className="text-xs font-bold text-slate-600">
-                    {done ? 'vs' : isTBD ? '⋯' : 'VS'}
-                  </span>
+                  <span className="text-xs font-bold text-slate-600">{done ? 'vs' : anyTBD ? '⋯' : 'VS'}</span>
                   <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
                 </div>
-                {/* Away player */}
-                <div className={`flex items-center gap-2.5 transition-opacity ${homeWon ? 'opacity-35' : ''}`}>
-                  {away && !isTBD ? (
-                    <Avatar name={away.fullName} size="sm" />
-                  ) : (
-                    <div className="w-7 h-7 rounded-full bg-slate-700 shrink-0 flex items-center justify-center text-slate-500 text-xs">?</div>
-                  )}
-                  <span className={`flex-1 text-sm truncate ${awayWon ? 'font-bold text-white' : 'font-medium'}`}
-                    style={{ color: awayWon ? '#f97316' : 'var(--text-primary)' }}>
-                    {isTBD ? 'TBD' : (away?.fullName || '—')}
-                  </span>
-                  {done && <span className={`text-xl font-black tabular-nums ${awayWon ? 'text-white' : 'text-slate-500'}`}>{match.awaySets}</span>}
-                  {awayWon && <span className="text-orange-400 text-xs font-bold">🏆</span>}
-                </div>
+                <PlayerSlot player={away} tbd={awayTBD} won={awayWon} lost={homeWon} sets={done ? match.awaySets : undefined} />
               </div>
             </button>
           );
         };
 
-        /* ── phase match score modal ── */
-        const PhaseMatchModal = () => {
-          const m = phaseMatchModal;
-          if (!m) return null;
-          const ph = phases.find((p: any) => p.id === m.phaseId);
-          const isKnockout = ph?.type === 'knockout';
-          const maxSets = isKnockout ? (league.setsPerMatch || 3) : undefined;
-
+        /* ── Empty state: phases not yet initialized ── */
+        if (phases.length === 0) {
           return (
-            <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
-              onClick={(e) => e.target === e.currentTarget && setPhaseMatchModal(null)}>
-              <div className="card rounded-2xl p-5 w-full max-w-sm space-y-4 animate-fade-in-up">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-bold text-white">Upiši rezultat</p>
-                  <button onClick={() => setPhaseMatchModal(null)} className="text-slate-400 hover:text-white">
-                    <X className="w-5 h-5" />
-                  </button>
+            <div className="animate-fade-in-up">
+              <div className="card px-6 py-12 flex flex-col items-center gap-4 text-center">
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl"
+                  style={{ backgroundColor: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.25)' }}>
+                  🏆
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 text-center">
-                    <Avatar name={m.homePlayer?.fullName} size="md" />
-                    <p className="text-xs font-semibold text-white mt-1.5 truncate">{m.homePlayer?.fullName}</p>
-                    <input type="number" min={0} max={maxSets || 99}
-                      value={phaseHomeScore} onChange={e => setPhaseHomeScore(parseInt(e.target.value) || 0)}
-                      className="mt-2 w-16 h-10 text-center text-xl font-bold rounded-xl bg-slate-800 border border-slate-600 text-white focus:border-orange-500 focus:outline-none"
-                    />
-                  </div>
-                  <span className="text-slate-500 font-bold text-sm">:</span>
-                  <div className="flex-1 text-center">
-                    <Avatar name={m.awayPlayer?.fullName} size="md" />
-                    <p className="text-xs font-semibold text-white mt-1.5 truncate">{m.awayPlayer?.fullName}</p>
-                    <input type="number" min={0} max={maxSets || 99}
-                      value={phaseAwayScore} onChange={e => setPhaseAwayScore(parseInt(e.target.value) || 0)}
-                      className="mt-2 w-16 h-10 text-center text-xl font-bold rounded-xl bg-slate-800 border border-slate-600 text-white focus:border-orange-500 focus:outline-none"
-                    />
-                  </div>
-                </div>
-                {isKnockout && (
-                  <p className="text-xs text-slate-500 text-center">
-                    Best of {maxSets} setova — potrebno {Math.ceil((maxSets || 3) / 2)} za pobedu
+                <div>
+                  <p className="text-white font-semibold text-base">EvroLiga nije pokrenuta</p>
+                  <p className="text-slate-400 text-sm mt-1">
+                    Dodaj igrače u ligi, zatim klikni dugme da pokreneš EvroLigu i generišeš regularni deo.
                   </p>
+                </div>
+                {canEdit && (
+                  <button
+                    onClick={generate}
+                    disabled={generating || lPlayers.length < 2}
+                    className="mt-2 flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {generating
+                      ? <><Loader2 className="w-4 h-4 animate-spin" /> Pokretanje...</>
+                      : '⚡ Pokreni EvroLigu'}
+                  </button>
                 )}
-                <button
-                  disabled={phaseSaveLoading}
-                  onClick={async () => {
-                    if (!club?.id || !m.phaseId) return;
-                    setPhaseSaveLoading(true);
-                    try {
-                      await leaguesApi.updatePhaseMatch(club.id, id, m.phaseId, m.id, phaseHomeScore, phaseAwayScore);
-                      setPhaseMatchModal(null);
-                      await loadPhaseData(activePhaseView);
-                    } finally { setPhaseSaveLoading(false); }
-                  }}
-                  className="w-full h-11 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-semibold text-sm transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {phaseSaveLoading ? <><Loader2 className="w-4 h-4 animate-spin" /> Čuvanje...</> : 'Sačuvaj rezultat'}
-                </button>
+                {lPlayers.length < 2 && (
+                  <p className="text-xs text-slate-500">Potrebna su najmanje 2 igrača (trenutno: {lPlayers.length})</p>
+                )}
               </div>
             </div>
           );
-        };
+        }
 
         return (
           <div className="animate-fade-in-up space-y-4">
 
-            {/* Phase selector */}
-            <div className="card px-4 py-3">
-              <div className="flex flex-wrap gap-2 items-center justify-between">
-                <div className="flex flex-wrap gap-2">
+            {/* ── Row 1: Phase pills (like main tab bar) + Sledeća faza ── */}
+            <div className="flex items-center gap-3 justify-between flex-wrap">
+              <div className="overflow-x-auto pb-0.5 -mx-4 px-4 md:mx-0 md:px-0">
+                <div className="flex gap-1 bg-slate-800 rounded-xl p-1 w-fit min-w-max">
                   {phases.map((p: any) => {
                     const isActive = p.id === activePhaseView;
-                    const statusColor =
+                    const statusDot =
                       p.status === 'active'    ? '#f97316' :
-                      p.status === 'completed' ? '#34d399' : 'var(--text-secondary)';
+                      p.status === 'completed' ? '#34d399' : '#64748b';
                     return (
                       <button
                         key={p.id}
                         onClick={async () => { setActivePhaseView(p.id); await loadPhaseData(p.id); setPhaseTab(p.type === 'knockout' ? 'bracket' : 'tabela'); }}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all
-                          ${isActive ? 'bg-orange-500/15 border border-orange-500/40 text-white' : 'bg-slate-800/60 border border-slate-700 hover:border-slate-500'}`}
-                        style={{ color: isActive ? undefined : statusColor }}
+                        className={`flex items-center gap-1.5 px-3 sm:px-4 py-2 text-sm font-medium rounded-lg transition-all whitespace-nowrap
+                          ${isActive ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
                       >
-                        <span className="w-1.5 h-1.5 rounded-full shrink-0"
-                          style={{ backgroundColor: statusColor }} />
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: statusDot }} />
                         {p.name}
-                        {p.status === 'active' && <span className="text-[10px] opacity-60">●</span>}
                       </button>
                     );
                   })}
                 </div>
-                {canAdvance && (
-                  <button
-                    disabled={advancingPhase}
-                    onClick={async () => {
-                      if (!confirm(`Napredovati u sledeću fazu?`)) return;
-                      setAdvancingPhase(true);
-                      try {
-                        const ps = await leaguesApi.advancePhase(club!.id, id);
-                        setPhases(ps);
-                        const next = ps.find((p: any) => p.status === 'active');
-                        if (next) { setActivePhaseView(next.id); await loadPhaseData(next.id); setPhaseTab(next.type === 'knockout' ? 'bracket' : 'tabela'); }
-                      } finally { setAdvancingPhase(false); }
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 transition-all disabled:opacity-50"
-                  >
-                    {advancingPhase ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ChevronRight className="w-3.5 h-3.5" />}
-                    Sledeća faza
-                  </button>
-                )}
               </div>
+              {canAdvance && (
+                <button
+                  disabled={advancingPhase}
+                  onClick={async () => {
+                    if (!confirm(`Napredovati u sledeću fazu?`)) return;
+                    setAdvancingPhase(true);
+                    try {
+                      const ps = await leaguesApi.advancePhase(club!.id, id);
+                      setPhases(ps);
+                      const next = ps.find((p: any) => p.status === 'active');
+                      if (next) { setActivePhaseView(next.id); await loadPhaseData(next.id); setPhaseTab(next.type === 'knockout' ? 'bracket' : 'tabela'); }
+                    } finally { setAdvancingPhase(false); }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 transition-all disabled:opacity-50 shrink-0"
+                >
+                  {advancingPhase ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                  Sledeća faza
+                </button>
+              )}
             </div>
 
-            {/* Phase sub-tab bar */}
-            {!isPlayoff && (
-              <div className="flex gap-1 bg-slate-800 rounded-xl p-1 w-fit">
-                {(['tabela', 'raspored'] as const).map(pt => (
-                  <button key={pt} onClick={() => setPhaseTab(pt)}
-                    className={`px-4 py-2 text-sm font-medium rounded-lg transition-all
-                      ${phaseTab === pt ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>
-                    {pt === 'tabela' ? 'Tabela' : 'Raspored'}
+            {/* ── Row 2: Content sub-tabs (Tabela / Večeri / Igrači or Bracket / Igrači) ── */}
+            <div className="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0 pb-0.5">
+              <div className="flex gap-1 bg-slate-800 rounded-xl p-1 w-fit min-w-max">
+                {(isPlayoff
+                  ? [{ id: 'bracket', label: 'Bracket', icon: <Trophy className="w-3.5 h-3.5" /> }, { id: 'igraci', label: 'Igrači', icon: <Users className="w-3.5 h-3.5" /> }]
+                  : [{ id: 'tabela', label: 'Tabela', icon: <BarChart3 className="w-3.5 h-3.5" /> }, { id: 'raspored', label: 'Raspored', icon: <Calendar className="w-3.5 h-3.5" /> }, { id: 'igraci', label: 'Igrači', icon: <Users className="w-3.5 h-3.5" /> }, { id: 'matrica', label: 'Matrica', icon: <Grid3x3 className="w-3.5 h-3.5" /> }]
+                ).map((pt) => (
+                  <button key={pt.id} onClick={() => setPhaseTab(pt.id as any)}
+                    className={`flex items-center gap-1.5 px-3 sm:px-4 py-2 text-sm font-medium rounded-lg transition-all duration-150 whitespace-nowrap
+                      ${phaseTab === pt.id ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>
+                    {pt.icon} {pt.label}
                   </button>
                 ))}
               </div>
-            )}
+            </div>
 
-            {phaseLoading && (
+            {phaseLoading && phaseTab !== 'igraci' && (
               <div className="card px-4 py-8 flex items-center justify-center text-slate-500 text-sm gap-2">
                 <Loader2 className="w-4 h-4 animate-spin" /> Učitavanje...
               </div>
             )}
 
-            {/* ── TABELA phase standings ── */}
+            {/* ── Action bar (Tabela tab only) ── */}
             {!phaseLoading && !isPlayoff && phaseTab === 'tabela' && (
-              <div className="card overflow-hidden">
-                {phaseStandings.length === 0 ? (
-                  <div className="px-4 py-8 text-center text-slate-500 text-sm">Nema podataka za ovu fazu</div>
-                ) : (
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                        {['#', 'Igrač', 'M', 'P', 'R', 'O', 'S+', 'S−', 'Bod.'].map(h => (
-                          <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {phaseStandings.map((s: any, i: number) => (
-                        <tr key={s.playerId} style={{ borderBottom: i < phaseStandings.length - 1 ? '1px solid var(--border)' : undefined }}>
-                          <td className="px-3 py-2.5 tabular-nums font-bold text-xs" style={{ color: medalColor(s.position) }}>{s.position}</td>
-                          <td className="px-3 py-2.5">
-                            <div className="flex items-center gap-2">
-                              <Avatar name={s.player?.fullName} size="sm" />
-                              <span className="font-medium truncate max-w-[8rem]" style={{ color: 'var(--text-primary)' }}>{s.player?.fullName}</span>
-                            </div>
-                          </td>
-                          <td className="px-3 py-2.5 tabular-nums text-center" style={{ color: 'var(--text-secondary)' }}>{s.played}</td>
-                          <td className="px-3 py-2.5 tabular-nums text-center text-emerald-400">{s.wins}</td>
-                          <td className="px-3 py-2.5 tabular-nums text-center text-amber-400">{s.draws}</td>
-                          <td className="px-3 py-2.5 tabular-nums text-center text-red-400">{s.losses}</td>
-                          <td className="px-3 py-2.5 tabular-nums text-center text-emerald-400">{s.setsFor}</td>
-                          <td className="px-3 py-2.5 tabular-nums text-center text-red-400">{s.setsAgainst}</td>
-                          <td className="px-3 py-2.5 tabular-nums font-bold text-center text-orange-400">{s.points}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              <div className="flex items-center gap-2 flex-wrap">
+                {lPlayers.length > 0 && (
+                  <button
+                    onClick={handleDownloadPlayerSheet}
+                    disabled={downloadingPlayerSheet}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-700/60 border border-slate-600 text-slate-300 text-xs font-medium hover:bg-slate-700 hover:text-white transition-all disabled:opacity-50"
+                  >
+                    {downloadingPlayerSheet
+                      ? <span className="animate-spin w-3.5 h-3.5 border-2 border-slate-400/30 border-t-slate-300 rounded-full" />
+                      : <Download className="w-3.5 h-3.5 shrink-0" />
+                    }
+                    <span className="hidden sm:inline">Lista igrača</span>
+                  </button>
+                )}
+                {phaseStandings.length > 0 && (
+                  <button
+                    onClick={handleDownloadStandings}
+                    disabled={downloadingStandings}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-400 text-xs font-medium hover:bg-orange-500/20 transition-all disabled:opacity-50"
+                  >
+                    {downloadingStandings
+                      ? <span className="animate-spin w-3.5 h-3.5 border-2 border-orange-400/30 border-t-orange-400 rounded-full" />
+                      : <Download className="w-3.5 h-3.5 shrink-0" />
+                    }
+                    <span className="hidden sm:inline">Tabela PDF</span>
+                  </button>
                 )}
               </div>
             )}
 
-            {/* ── RASPORED phase fixtures ── */}
-            {!phaseLoading && !isPlayoff && phaseTab === 'raspored' && (
-              <div className="space-y-3">
-                {Object.keys(phaseByRound).length === 0 ? (
-                  <div className="card px-4 py-8 text-center text-slate-500 text-sm">Nema mečeva</div>
-                ) : (
-                  Object.entries(phaseByRound).map(([round, matches]) => (
-                    <div key={round} className="card overflow-hidden">
-                      <div className="px-4 py-2.5 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
-                        <span className="text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Kolo {round}</span>
-                        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                          {(matches as any[]).filter(m => m.status === 'completed').length}/{(matches as any[]).length}
-                        </span>
+            {/* ── TABELA phase standings ── */}
+            {!phaseLoading && !isPlayoff && phaseTab === 'tabela' && (() => {
+              if (phaseStandings.length === 0) {
+                return <div className="card px-4 py-8 text-center text-slate-500 text-sm">Nema podataka za ovu fazu</div>;
+              }
+
+              const phaseWinRate = (s: any) => s.played > 0 ? Math.round((s.wins / s.played) * 100) : 0;
+              const top3 = phaseStandings.slice(0, 3);
+              const bestWins = [...phaseStandings].sort((a: any, b: any) => b.wins - a.wins)[0];
+              const mostSets = [...phaseStandings].sort((a: any, b: any) => b.setsFor - a.setsFor)[0];
+              const ptGap = phaseStandings.length > 1 ? phaseStandings[0].points - phaseStandings[1].points : 0;
+              const top5wr = phaseStandings.slice(0, Math.min(5, phaseStandings.length));
+              const maxWr = Math.max(...top5wr.map(phaseWinRate), 1);
+
+              const pMedalBg = (pos: number) =>
+                pos === 1 ? 'rgba(234,179,8,0.12)' : pos === 2 ? 'rgba(148,163,184,0.10)' : 'rgba(180,83,9,0.10)';
+              const pMedalBorder = (pos: number) =>
+                pos === 1 ? 'rgba(234,179,8,0.30)' : pos === 2 ? 'rgba(148,163,184,0.25)' : 'rgba(180,83,9,0.28)';
+              const pMedalText = (pos: number) =>
+                pos === 1 ? '#facc15' : pos === 2 ? '#cbd5e1' : '#f97316';
+              const pMedalEmoji = (pos: number) =>
+                pos === 1 ? '🥇' : pos === 2 ? '🥈' : '🥉';
+
+              return (
+                <div className="space-y-4">
+                  {/* ── TOP 3 PODIUM ── */}
+                  <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                    {top3.map((s: any, i: number) => (
+                      <div key={s.playerId}
+                        onClick={() => setSelectedPlayer(lPlayers.find((lp: any) => lp.playerId === s.player?.id))}
+                        className="rounded-2xl p-3 sm:p-4 flex flex-col items-center gap-2 animate-fade-in-up cursor-pointer transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+                        style={{ backgroundColor: pMedalBg(s.position), border: `1px solid ${pMedalBorder(s.position)}`,
+                          boxShadow: s.position === 1 ? '0 0 24px rgba(234,179,8,0.08), 0 4px 16px rgba(0,0,0,0.2)' : '0 2px 8px rgba(0,0,0,0.12)',
+                          animationDelay: `${i * 60}ms` }}>
+                        <span className="text-xl sm:text-2xl leading-none">{pMedalEmoji(s.position)}</span>
+                        <Avatar name={s.player?.fullName} player={s.player} size="lg" winRate={phaseWinRate(s)} rank={s.position} />
+                        <div className="text-center min-w-0 w-full">
+                          <p className="text-xs sm:text-sm font-bold text-white truncate leading-tight">{s.player?.fullName?.split(' ')[0]}</p>
+                          <p className="text-[10px] text-slate-400 truncate hidden sm:block">{s.player?.fullName?.split(' ').slice(1).join(' ')}</p>
+                        </div>
+                        <div className="flex flex-col items-center">
+                          <span className="text-lg sm:text-2xl font-black tabular-nums leading-none" style={{ color: pMedalText(s.position) }}>{s.points}</span>
+                          <span className="text-[10px] text-slate-500">bod.</span>
+                        </div>
+                        <div className="text-[10px] text-slate-500">{phaseWinRate(s)}% pobeda</div>
                       </div>
-                      <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
-                        {(matches as any[]).map((m: any) => {
-                          const done = m.status === 'completed';
-                          const homeWon = done && m.winnerId === m.homePlayerId;
-                          const awayWon = done && m.winnerId === m.awayPlayerId;
-                          return (
-                            <button
-                              key={m.id}
-                              onClick={() => { if (canEdit) { setPhaseMatchModal(m); setPhaseHomeScore(m.homeSets ?? 0); setPhaseAwayScore(m.awaySets ?? 0); } }}
-                              className={`w-full flex items-center px-4 py-3 gap-3 text-left transition-all ${canEdit ? 'hover:brightness-110 active:scale-[0.99] cursor-pointer' : 'cursor-default'}`}
-                            >
-                              <div className="flex-1 flex items-center gap-2 justify-end">
-                                <span className={`text-sm truncate max-w-[7rem] ${homeWon ? 'font-bold' : ''}`}
-                                  style={{ color: homeWon ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
-                                  {m.homePlayer?.fullName}
-                                </span>
-                                <Avatar name={m.homePlayer?.fullName} size="sm" />
+                    ))}
+                  </div>
+
+                  {/* ── INSIGHTS ── */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {[
+                      { icon: <Trophy className="w-3.5 h-3.5 text-yellow-400" />, label: 'Lider', value: phaseStandings[0]?.player?.fullName?.split(' ')[0], sub: `${phaseStandings[0]?.points} bod.`, color: 'text-yellow-400' },
+                      { icon: <Zap className="w-3.5 h-3.5 text-green-400" />, label: 'Najviše pobeda', value: bestWins?.player?.fullName?.split(' ')[0], sub: `${bestWins?.wins} P`, color: 'text-green-400' },
+                      { icon: <Target className="w-3.5 h-3.5 text-orange-400" />, label: 'Najviše setova', value: mostSets?.player?.fullName?.split(' ')[0], sub: `${mostSets?.setsFor} S+`, color: 'text-orange-400' },
+                      { icon: <BarChart3 className="w-3.5 h-3.5 text-blue-400" />, label: 'Prednost #1', value: ptGap === 0 ? 'Izjednačeno' : `+${ptGap}`, sub: ptGap === 0 ? '—' : 'bodova pred #2', color: 'text-blue-400' },
+                    ].map((ins, i) => (
+                      <div key={ins.label} className="card p-3 animate-fade-in-up" style={{ animationDelay: `${i * 50}ms` }}>
+                        <div className="flex items-center gap-1.5 mb-1.5">{ins.icon}<span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">{ins.label}</span></div>
+                        <p className={`text-sm font-bold truncate ${ins.color}`}>{ins.value}</p>
+                        <p className="insight-sub">{ins.sub}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* ── WIN RATE CHART ── */}
+                  <div className="card p-4">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">% Pobeda · Top {top5wr.length}</p>
+                    <div className="space-y-2.5">
+                      {top5wr.map((s: any, i: number) => {
+                        const wr = phaseWinRate(s);
+                        return (
+                          <div key={s.playerId} className="flex items-center gap-3 animate-fade-in" style={{ animationDelay: `${i * 40}ms` }}>
+                            <span className="text-[11px] text-slate-500 w-4 tabular-nums text-right shrink-0">{i + 1}</span>
+                            <span className="text-xs text-slate-300 w-20 truncate shrink-0">{s.player?.fullName?.split(' ')[0]}</span>
+                            <div className="flex-1 h-2 rounded-full overflow-hidden progress-track">
+                              <div className="h-full rounded-full transition-all duration-700 ease-out"
+                                style={{ width: `${(wr / maxWr) * 100}%`, background: i === 0 ? 'linear-gradient(90deg,#facc15,#f97316)' : 'linear-gradient(90deg,#f97316,#fb923c)' }} />
+                            </div>
+                            <span className="text-[11px] font-semibold tabular-nums w-8 text-right shrink-0" style={{ color: i === 0 ? '#facc15' : '#fb923c' }}>{wr}%</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* ── FULL TABLE ── */}
+                  <div className="card overflow-hidden">
+                    {/* Desktop */}
+                    <div className="hidden md:block overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
+                            {['#', 'Igrač', 'M', 'P', 'R', 'G', 'S+', 'S−', 'Bod.'].map(h => (
+                              <th key={h} className="text-left text-[10px] font-semibold uppercase tracking-widest px-4 py-2.5" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {phaseStandings.map((s: any, idx: number) => (
+                            <tr key={s.playerId}
+                              onClick={() => setSelectedPlayer(lPlayers.find((lp: any) => lp.playerId === s.player?.id))}
+                              className="cursor-pointer transition-colors animate-fade-in table-row-hover"
+                              style={{ borderBottom: '1px solid var(--border)', backgroundColor: s.position === 1 ? 'rgba(234,179,8,0.03)' : undefined, animationDelay: `${idx * 25}ms` }}>
+                              <td className="px-4 py-3 w-10"><RankBadge pos={s.position} /></td>
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2.5">
+                                  <Avatar name={s.player?.fullName} player={s.player} winRate={phaseWinRate(s)} rank={s.position} />
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-semibold text-white text-sm truncate">{s.player?.fullName}</span>
+                                      {s.position === 1 && <Trophy className="w-3 h-3 text-yellow-400 shrink-0" />}
+                                    </div>
+                                    <div className="flex items-center gap-1.5 mt-0.5">
+                                      <div className="h-1 w-12 rounded-full overflow-hidden progress-track">
+                                        <div className="h-full rounded-full"
+                                          style={{ width: `${phaseWinRate(s)}%`, backgroundColor: phaseWinRate(s) >= 60 ? '#4ade80' : phaseWinRate(s) >= 40 ? '#fb923c' : '#f87171' }} />
+                                      </div>
+                                      <span className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>{phaseWinRate(s)}%</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-slate-400 tabular-nums">{s.played}</td>
+                              <td className="px-4 py-3 font-semibold text-green-400 tabular-nums">{s.wins}</td>
+                              <td className="px-4 py-3 font-medium text-yellow-400 tabular-nums">{s.draws}</td>
+                              <td className="px-4 py-3 font-medium text-red-400 tabular-nums">{s.losses}</td>
+                              <td className="px-4 py-3 text-slate-300 tabular-nums">{s.setsFor}</td>
+                              <td className="px-4 py-3 text-slate-500 tabular-nums">{s.setsAgainst}</td>
+                              <td className="px-4 py-3">
+                                <span className="text-lg font-black text-orange-400 tabular-nums leading-none">{s.points}</span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Mobile cards */}
+                    <div className="md:hidden divide-y" style={{ borderColor: 'var(--border)' }}>
+                      {phaseStandings.map((s: any, idx: number) => (
+                        <div key={s.playerId}
+                          onClick={() => setSelectedPlayer(lPlayers.find((lp: any) => lp.playerId === s.player?.id))}
+                          className="px-4 py-3.5 animate-fade-in cursor-pointer active:bg-slate-800/50 transition-colors"
+                          style={{ backgroundColor: s.position === 1 ? 'rgba(234,179,8,0.03)' : undefined, animationDelay: `${idx * 25}ms` }}>
+                          <div className="flex items-center gap-3">
+                            <RankBadge pos={s.position} />
+                            <Avatar name={s.player?.fullName} player={s.player} />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-semibold text-white text-sm truncate">{s.player?.fullName}</span>
+                                {s.position === 1 && <Trophy className="w-3 h-3 text-yellow-400 shrink-0" />}
                               </div>
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                {done ? (
-                                  <>
-                                    <span className={`text-base font-black tabular-nums w-5 text-center ${homeWon ? 'text-white' : 'text-slate-500'}`}>{m.homeSets}</span>
-                                    <span className="text-slate-600 text-xs">:</span>
-                                    <span className={`text-base font-black tabular-nums w-5 text-center ${awayWon ? 'text-white' : 'text-slate-500'}`}>{m.awaySets}</span>
-                                  </>
-                                ) : (
-                                  <span className="text-xs font-semibold text-slate-600 px-2">vs</span>
+                              <div className="flex items-center gap-2.5 mt-1">
+                                <span className="text-[11px] font-medium text-green-400">{s.wins}P</span>
+                                {s.draws > 0 && <span className="text-[11px] font-medium text-yellow-400">{s.draws}R</span>}
+                                <span className="text-[11px] font-medium text-red-400">{s.losses}G</span>
+                                <span className="text-[11px] text-slate-500">{s.played} M</span>
+                                <span className="text-[11px] text-slate-600">{s.setsFor}/{s.setsAgainst}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 mt-1.5">
+                                <div className="h-1 w-20 rounded-full overflow-hidden progress-track">
+                                  <div className="h-full rounded-full"
+                                    style={{ width: `${phaseWinRate(s)}%`, backgroundColor: phaseWinRate(s) >= 60 ? '#4ade80' : phaseWinRate(s) >= 40 ? '#fb923c' : '#f87171' }} />
+                                </div>
+                                <span className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>{phaseWinRate(s)}%</span>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <span className="text-2xl font-black text-orange-400 tabular-nums leading-none">{s.points}</span>
+                              <p className="text-[10px] text-slate-500 mt-0.5">bodova</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Legend */}
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 px-1">
+                    {[
+                      { color: 'text-green-400', label: 'P – Pobeda' },
+                      { color: 'text-yellow-400', label: 'R – Remi' },
+                      { color: 'text-red-400', label: 'G – Gubitak' },
+                      { color: 'text-slate-400', label: 'M – Mečevi' },
+                      { color: 'text-slate-500', label: 'S+/S− – Setovi' },
+                    ].map(({ color, label }) => (
+                      <span key={label} className={`text-[11px] ${color}`}>{label}</span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ── VEČERI — session UI for round-robin phases (same look as session-mode leagues) ── */}
+            {!phaseLoading && !isPlayoff && phaseTab === 'raspored' && (() => {
+              const pendingInPool   = phaseFixtures.filter((m: any) => m.status === 'pending' && !m.sessionId).length;
+              const activeSession   = sessions.find((s: any) => s.status === 'open');
+              const closedSessions  = sessions.filter((s: any) => s.status !== 'open');
+              const totalInSessions = sessions.reduce((a: number, s: any) => a + (s.matchCount || 0), 0);
+              const completedTotal  = sessions.reduce((a: number, s: any) => a + (s.completedCount || 0), 0);
+              const pct = totalInSessions > 0 ? Math.round((completedTotal / totalInSessions) * 100) : 0;
+
+              if (phaseFixtures.length === 0) {
+                return <div className="card px-4 py-8 text-center text-slate-500 text-sm">Nema mečeva za ovu fazu</div>;
+              }
+
+              if (sessions.length === 0) {
+                return (
+                  <div className="card p-8 text-center">
+                    <UserCheck className="w-10 h-10 text-slate-600 mx-auto mb-3" />
+                    <p className="text-sm font-medium text-white mb-1">Nema ligaških dana</p>
+                    <p className="text-xs text-slate-500 mb-4">
+                      Pool ima {phaseFixtures.length} mečeva. Odaberi prisutne igrače i kreiraj prvi ligaški dan.
+                    </p>
+                    {canEdit && (
+                      <button onClick={openNewSession} className="btn-primary text-sm mx-auto flex items-center gap-1.5">
+                        <Plus className="w-4 h-4" /> Nova večer
+                      </button>
+                    )}
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-3">
+                  {/* ── HEADER / OVERVIEW CARD ── */}
+                  <div className="card p-4">
+                    <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-orange-400 shrink-0" />
+                          <span className="text-sm font-semibold text-white">Ligaški dani — {activePhase?.name}</span>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          <span className="text-white font-semibold">{completedTotal}</span>
+                          <span className="text-slate-500"> / {totalInSessions} odigrano</span>
+                          {pendingInPool > 0 && <span className="text-slate-600 ml-2">· {pendingInPool} u pool-u</span>}
+                        </p>
+                      </div>
+                      {canEdit && (
+                        <button onClick={openNewSession} className="btn-primary text-sm py-2 px-4 flex items-center gap-1.5 shrink-0">
+                          <Plus className="w-4 h-4" /> Novi Dan
+                        </button>
+                      )}
+                    </div>
+                    <div className="h-2 rounded-full overflow-hidden progress-track">
+                      <div className="h-full rounded-full transition-all duration-1000 ease-out"
+                        style={{ width: `${pct}%`, background: pct === 100 ? 'linear-gradient(90deg,#22c55e,#4ade80)' : 'linear-gradient(90deg,#f97316,#fb923c)' }} />
+                    </div>
+                    <div className="flex items-center justify-between mt-1.5 flex-wrap gap-1">
+                      <div className="flex items-center gap-3">
+                        {activeSession && (
+                          <span className="flex items-center gap-1.5 text-[11px] text-orange-400">
+                            <span className="w-2 h-2 rounded-full bg-orange-400 inline-block animate-pulse" />
+                            1 aktivna
+                          </span>
+                        )}
+                        {closedSessions.length > 0 && <span className="text-[11px] text-slate-500">{closedSessions.length} završenih</span>}
+                        <span className="text-[11px] text-slate-600">· {sessions.length} ukupno</span>
+                      </div>
+                      <span className="text-[11px] font-bold tabular-nums" style={{ color: pct === 100 ? '#4ade80' : '#fb923c' }}>{pct}%</span>
+                    </div>
+                  </div>
+
+                  {/* ── ACTIVE SESSION HERO ── */}
+                  {activeSession && (() => {
+                    const sm = phaseFixtures.filter((m: any) => m.sessionId === activeSession.id);
+                    const pendingMs = sm.filter((m: any) => m.status !== 'completed');
+                    const doneCount = sm.filter((m: any) => m.status === 'completed').length;
+                    const sPct = activeSession.matchCount > 0 ? Math.round((doneCount / activeSession.matchCount) * 100) : 0;
+                    return (
+                      <div className="rounded-2xl overflow-hidden"
+                        style={{ border: '1px solid rgba(249,115,22,0.30)', boxShadow: '0 0 0 1px rgba(249,115,22,0.06), 0 4px 24px rgba(249,115,22,0.07)', backgroundColor: 'var(--bg-card)' }}>
+                        {/* Hero header */}
+                        <div className="px-4 pt-4 pb-3"
+                          style={{ background: 'linear-gradient(135deg,rgba(249,115,22,0.07) 0%,transparent 55%)', borderBottom: '1px solid rgba(249,115,22,0.14)' }}>
+                          <div className="flex items-start gap-3">
+                            {/* Number badge with live ping */}
+                            <div className="relative shrink-0 mt-0.5">
+                              <div className="w-10 h-10 rounded-xl bg-orange-500/15 border border-orange-500/25 flex items-center justify-center">
+                                <span className="text-base font-bold text-orange-400">{activeSession.sessionNumber}</span>
+                              </div>
+                              <span className="absolute -top-1 -right-1 flex">
+                                <span className="relative w-3 h-3 rounded-full bg-orange-500 border-2 border-[var(--bg-card)]">
+                                  <span className="absolute inset-0 rounded-full bg-orange-400 animate-ping opacity-70" />
+                                </span>
+                              </span>
+                            </div>
+
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h3 className="text-base font-bold text-white leading-tight">Ligaški Dan {activeSession.sessionNumber}</h3>
+                                <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 bg-orange-500/15 text-orange-400 border border-orange-500/25 rounded-full font-semibold uppercase tracking-wider">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-orange-400" />Aktivan
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-3 mt-1 flex-wrap">
+                                <span className="flex items-center gap-1 text-xs text-slate-400">
+                                  <Users className="w-3 h-3 text-slate-500 shrink-0" />
+                                  {activeSession.presentPlayerIds?.length ?? 0} igrača
+                                </span>
+                                <span className="flex items-center gap-1 text-xs text-slate-400">
+                                  <Target className="w-3 h-3 text-slate-500 shrink-0" />
+                                  {doneCount}/{activeSession.matchCount} odigrano
+                                </span>
+                                {activeSession.sessionDate && (
+                                  <span className="flex items-center gap-1 text-xs text-slate-400">
+                                    <Calendar className="w-3 h-3 text-slate-500 shrink-0" />
+                                    {new Date(activeSession.sessionDate).toLocaleDateString('sr-RS')}
+                                  </span>
                                 )}
                               </div>
-                              <div className="flex-1 flex items-center gap-2">
-                                <Avatar name={m.awayPlayer?.fullName} size="sm" />
-                                <span className={`text-sm truncate max-w-[7rem] ${awayWon ? 'font-bold' : ''}`}
-                                  style={{ color: awayWon ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
-                                  {m.awayPlayer?.fullName}
+                            </div>
+
+                            {canEdit && (
+                              <button onClick={() => handleDeleteSession(activeSession.id)} disabled={deletingSession === activeSession.id}
+                                className="p-2 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors shrink-0 disabled:opacity-50" title="Obriši sesiju">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Session progress bar */}
+                          {activeSession.matchCount > 0 && (
+                            <div className="mt-3">
+                              <div className="h-1.5 rounded-full overflow-hidden progress-track">
+                                <div className="h-full bg-orange-500/60 rounded-full transition-all duration-700" style={{ width: `${sPct}%` }} />
+                              </div>
+                              <div className="flex items-center justify-between mt-1">
+                                <span className="text-[10px] text-slate-500">{pendingMs.length} preostalih</span>
+                                <span className="text-[10px] font-semibold text-orange-400">{sPct}%</span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Action buttons */}
+                          {canEdit && (
+                            <div className="hidden lg:flex items-center gap-2 mt-3 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                              <button onClick={() => handleDownloadScoresheet(activeSession, sm)} disabled={downloadingScoresheet === activeSession.id}
+                                className="flex items-center gap-1.5 text-sm px-3.5 py-2 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/20 rounded-xl transition-all font-medium disabled:opacity-50">
+                                {downloadingScoresheet === activeSession.id
+                                  ? <span className="animate-spin w-3.5 h-3.5 border-2 border-orange-400/30 border-t-orange-400 rounded-full inline-block" />
+                                  : <Download className="w-3.5 h-3.5" />}
+                                Raspored
+                              </button>
+                              {doneCount > 0 && (
+                                <button onClick={() => handleDownloadPDF(activeSession.sessionNumber, sm)} disabled={downloadingRound === activeSession.sessionNumber}
+                                  className="flex items-center gap-1.5 text-sm px-3.5 py-2 bg-slate-700/60 hover:bg-slate-700 text-slate-300 border border-slate-600/40 rounded-xl transition-all font-medium disabled:opacity-50">
+                                  {downloadingRound === activeSession.sessionNumber
+                                    ? <span className="animate-spin w-3.5 h-3.5 border-2 border-slate-400/30 border-t-slate-300 rounded-full inline-block" />
+                                    : <Download className="w-3.5 h-3.5" />}
+                                  Rezultati PDF
+                                </button>
+                              )}
+                              <button onClick={() => handleCloseSession(activeSession.id)} disabled={closingSession === activeSession.id}
+                                className="flex items-center gap-1.5 text-sm px-3.5 py-2 bg-slate-700/60 hover:bg-red-500/10 text-slate-400 hover:text-red-400 border border-slate-600/40 hover:border-red-500/25 rounded-xl transition-all font-medium disabled:opacity-50 ml-auto">
+                                {closingSession === activeSession.id
+                                  ? <span className="animate-spin w-3.5 h-3.5 border-2 border-slate-400/30 border-t-slate-400 rounded-full inline-block" />
+                                  : <Lock className="w-3.5 h-3.5" />}
+                                Zatvori Sesiju
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Match list */}
+                        {sm.length > 0 ? (
+                          <>
+                            {pendingMs.length > 0 && (
+                              <div className="px-4 py-2 flex items-center gap-2" style={{ borderBottom: '1px solid rgba(249,115,22,0.08)' }}>
+                                <Zap className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                                <span className="text-xs font-semibold text-orange-400 uppercase tracking-wide">
+                                  Naredni mečevi · {pendingMs.length} preostalih
                                 </span>
                               </div>
-                            </button>
+                            )}
+                            <div className="divide-y divide-slate-700/30">
+                              {sm.map((m: any, idx: number) => {
+                                const completed = m.status === 'completed';
+                                const homeWon   = completed && m.homeSets > m.awaySets;
+                                const awayWon   = completed && m.awaySets > m.homeSets;
+                                const isDraw    = completed && m.homeSets === m.awaySets;
+                                return (
+                                  <div key={m.id} className={`flex items-center px-3 sm:px-4 py-3 gap-2 transition-colors ${completed ? 'opacity-55' : 'hover:bg-orange-500/[0.025]'}`}>
+                                    <span className="text-[10px] text-slate-700 w-4 shrink-0 tabular-nums text-center">{idx + 1}</span>
+                                    <div className="flex-1 flex items-center justify-end gap-1 min-w-0">
+                                      {homeWon && <Zap className="w-3 h-3 text-green-400 shrink-0" />}
+                                      <span className={`text-sm font-medium text-right truncate ${homeWon ? 'text-green-400' : awayWon ? 'text-slate-500' : 'text-white'}`}>
+                                        {m.homePlayer?.fullName}
+                                      </span>
+                                    </div>
+                                    <div className="w-14 text-center shrink-0">
+                                      {completed ? (
+                                        <span className={`text-sm font-bold tabular-nums px-1.5 py-0.5 rounded-lg ${isDraw ? 'text-yellow-400 bg-yellow-500/10' : homeWon ? 'text-green-400 bg-green-500/10' : 'text-red-400 bg-red-500/10'}`}>
+                                          {m.homeSets}:{m.awaySets}
+                                        </span>
+                                      ) : (
+                                        <span className="text-[11px] text-slate-600 font-bold tracking-wider">vs</span>
+                                      )}
+                                    </div>
+                                    <div className="flex-1 flex items-center gap-1 min-w-0">
+                                      {awayWon && <Zap className="w-3 h-3 text-green-400 shrink-0" />}
+                                      <span className={`text-sm font-medium truncate ${awayWon ? 'text-green-400' : homeWon ? 'text-slate-500' : 'text-white'}`}>
+                                        {m.awayPlayer?.fullName}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      {canEdit && !completed && (
+                                        <button
+                                          onClick={() => { setPhaseMatchModal(m); setPhaseHomeScore(m.homeSets ?? 0); setPhaseAwayScore(m.awaySets ?? 0); }}
+                                          className="text-xs px-3 py-1.5 bg-orange-500/15 text-orange-400 hover:bg-orange-500/25 rounded-lg transition-colors font-semibold touch-target">
+                                          Unesi
+                                        </button>
+                                      )}
+                                      {canEdit && completed && (
+                                        <button
+                                          onClick={() => { setPhaseMatchModal(m); setPhaseHomeScore(m.homeSets ?? 0); setPhaseAwayScore(m.awaySets ?? 0); }}
+                                          className="text-[11px] px-2 py-1 text-slate-600 hover:text-slate-300 rounded-lg transition-colors">
+                                          Ispravi
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="px-4 py-6 text-center text-xs text-slate-500">
+                            Mečevi se učitavaju — klikni "Zatvori" pa ponovo otvori sesiju da ih vidiš.
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* ── PRETHODNE SESIJE ── */}
+                  {closedSessions.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-widest px-1 mb-2 text-slate-500">
+                        Prethodne sesije ({closedSessions.length})
+                      </p>
+                      <div className="card overflow-hidden">
+                        {closedSessions.map((session: any, sIdx: number) => {
+                          const isExp  = expandedSessions.has(session.id);
+                          const sm2    = phaseFixtures.filter((m: any) => m.sessionId === session.id);
+                          const done   = session.completedCount ?? sm2.filter((m: any) => m.status === 'completed').length;
+                          const total  = session.matchCount ?? sm2.length;
+                          const full   = total > 0 && done === total;
+                          const rowPct = total > 0 ? (done / total) * 100 : 0;
+                          return (
+                            <div key={session.id} className={sIdx > 0 ? 'border-t border-slate-700/40' : ''}>
+                              {/* Timeline row */}
+                              <div className="flex items-center gap-3 px-4 py-3 cursor-pointer select-none group transition-colors hover:bg-slate-800/25"
+                                onClick={() => toggleExpanded(session.id)}>
+                                <div className={`w-2 h-2 rounded-full shrink-0 ${full ? 'bg-green-400' : 'bg-slate-500'}`} />
+                                <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${full ? 'bg-green-500/10 text-green-400' : 'bg-slate-700/60 text-slate-400'}`}>
+                                  {session.sessionNumber}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-sm font-medium text-white">Ligaški Dan {session.sessionNumber}</span>
+                                  {session.sessionDate && (
+                                    <span className="text-[11px] text-slate-500 ml-2">
+                                      {new Date(session.sessionDate).toLocaleDateString('sr-RS')}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2.5 shrink-0">
+                                  <span className={`hidden sm:inline text-xs font-medium ${full ? 'text-green-400' : 'text-slate-500'}`}>
+                                    {full ? 'Završena' : 'Zatvorena'}
+                                  </span>
+                                  <span className="text-xs text-slate-500 tabular-nums">{done}/{total}</span>
+                                  <div className="w-14 h-1.5 rounded-full overflow-hidden hidden sm:block progress-track">
+                                    <div className={`h-full rounded-full transition-all duration-500 ${full ? 'bg-green-500/60' : 'bg-slate-500/50'}`}
+                                      style={{ width: `${rowPct}%` }} />
+                                  </div>
+                                  <ChevronDown className={`w-4 h-4 text-slate-600 group-hover:text-slate-400 transition-transform duration-200 ${isExp ? 'rotate-180' : ''}`} />
+                                </div>
+                              </div>
+
+                              {/* Accordion */}
+                              {isExp && (
+                                <div className="border-t border-slate-700/40 bg-slate-900/20 animate-fade-in">
+                                  <div className="flex items-center gap-1.5 px-4 py-2.5 flex-wrap"
+                                    style={{ borderBottom: sm2.length > 0 ? '1px solid rgba(51,65,85,0.4)' : undefined }}
+                                    onClick={(e) => e.stopPropagation()}>
+                                    <button onClick={() => handleDownloadScoresheet(session, sm2)} disabled={downloadingScoresheet === session.id}
+                                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 rounded-lg transition-colors font-medium disabled:opacity-50">
+                                      {downloadingScoresheet === session.id
+                                        ? <span className="animate-spin w-3 h-3 border-2 border-orange-400/30 border-t-orange-400 rounded-full inline-block" />
+                                        : <Download className="w-3.5 h-3.5" />}
+                                      Raspored
+                                    </button>
+                                    {done > 0 && (
+                                      <button onClick={() => handleDownloadPDF(session.sessionNumber, sm2)} disabled={downloadingRound === session.sessionNumber}
+                                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors font-medium disabled:opacity-50">
+                                        {downloadingRound === session.sessionNumber
+                                          ? <span className="animate-spin w-3 h-3 border-2 border-slate-400/30 border-t-slate-300 rounded-full inline-block" />
+                                          : <Download className="w-3.5 h-3.5" />}
+                                        Rezultati PDF
+                                      </button>
+                                    )}
+                                    {canEdit && (
+                                      <button onClick={() => handleDeleteSession(session.id)} disabled={deletingSession === session.id}
+                                        className="ml-auto p-2 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50" title="Obriši sesiju">
+                                        {deletingSession === session.id
+                                          ? <span className="animate-spin w-3.5 h-3.5 border-2 border-slate-600/30 border-t-slate-500 rounded-full inline-block" />
+                                          : <Trash2 className="w-3.5 h-3.5" />}
+                                      </button>
+                                    )}
+                                  </div>
+                                  {sm2.length > 0 ? (
+                                    <div className="divide-y divide-slate-700/20">
+                                      {sm2.map((m: any, idx: number) => {
+                                        const completed = m.status === 'completed';
+                                        const homeWon   = completed && m.homeSets > m.awaySets;
+                                        const awayWon   = completed && m.awaySets > m.homeSets;
+                                        const isDraw    = completed && m.homeSets === m.awaySets;
+                                        return (
+                                          <div key={m.id} className="flex items-center px-4 py-2.5 gap-2 hover:bg-slate-800/20 transition-colors">
+                                            <span className="text-[10px] text-slate-700 w-4 shrink-0 tabular-nums text-center">{idx + 1}</span>
+                                            <div className="flex-1 flex items-center justify-end gap-1 min-w-0">
+                                              {homeWon && <Zap className="w-3 h-3 text-green-400 shrink-0" />}
+                                              <span className={`text-sm font-medium text-right truncate ${homeWon ? 'text-green-400' : awayWon ? 'text-slate-500' : 'text-slate-200'}`}>
+                                                {m.homePlayer?.fullName}
+                                              </span>
+                                            </div>
+                                            <div className="w-14 text-center shrink-0">
+                                              {completed ? (
+                                                <span className={`text-sm font-bold tabular-nums px-1.5 py-0.5 rounded ${isDraw ? 'text-yellow-400' : homeWon ? 'text-green-400' : 'text-red-400'}`}>
+                                                  {m.homeSets}:{m.awaySets}
+                                                </span>
+                                              ) : (
+                                                <span className="text-xs text-slate-600 font-medium">vs</span>
+                                              )}
+                                            </div>
+                                            <div className="flex-1 flex items-center gap-1 min-w-0">
+                                              {awayWon && <Zap className="w-3 h-3 text-green-400 shrink-0" />}
+                                              <span className={`text-sm font-medium truncate ${awayWon ? 'text-green-400' : homeWon ? 'text-slate-500' : 'text-slate-200'}`}>
+                                                {m.awayPlayer?.fullName}
+                                              </span>
+                                            </div>
+                                            <div className="flex items-center gap-1 shrink-0">
+                                              {canEdit && completed && !m.isWalkover && (
+                                                <button
+                                                  onClick={() => { setPhaseMatchModal(m); setPhaseHomeScore(m.homeSets ?? 0); setPhaseAwayScore(m.awaySets ?? 0); }}
+                                                  className="text-[11px] px-2 py-1 text-slate-600 hover:text-slate-300 rounded-lg transition-colors">
+                                                  Ispravi
+                                                </button>
+                                              )}
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : (
+                                    <div className="px-4 py-4 text-center text-xs text-slate-500">Nema mečeva za ovu sesiju.</div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           );
                         })}
                       </div>
                     </div>
-                  ))
-                )}
-              </div>
-            )}
+                  )}
+                </div>
+              );
+            })()}
+
+
+            {/* ── IGRAČI ── */}
+            {phaseTab === 'igraci' && (() => {
+              const sortedByPhase = [...lPlayers]
+                .sort((a: any, b: any) => {
+                  if (playerSort === 'name') return (a.player?.fullName ?? '').localeCompare(b.player?.fullName ?? '');
+                  const sa = phaseStandings.find((s: any) => s.playerId === a.playerId);
+                  const sb = phaseStandings.find((s: any) => s.playerId === b.playerId);
+                  return (sb?.points ?? -1) - (sa?.points ?? -1);
+                });
+              const filtered = sortedByPhase.filter((lp: any) =>
+                lp.player?.fullName?.toLowerCase().includes(playerSearch.toLowerCase())
+              );
+              return (
+                <div className="animate-fade-in-up space-y-3">
+                  {/* Header */}
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-2 shrink-0">
+                      <h3 className="font-bold text-white text-base">Igrači</h3>
+                      <span className="text-xs font-semibold text-slate-500 bg-slate-700/60 px-1.5 py-0.5 rounded-full tabular-nums">{lPlayers.length}</span>
+                    </div>
+                    <div className="flex items-center gap-2 input-field px-2.5 py-2 flex-1 min-w-0">
+                      <Search className="w-3.5 h-3.5 text-orange-400/60 shrink-0" />
+                      <input type="text" value={playerSearch} onChange={(e) => setPlayerSearch(e.target.value)}
+                        placeholder="Pretraži..." className="flex-1 bg-transparent text-sm outline-none text-white placeholder-slate-500 min-w-0" />
+                      {playerSearch && (
+                        <button onClick={() => setPlayerSearch('')} className="text-slate-500 hover:text-white transition-colors shrink-0">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Sort bar */}
+                  <div className="flex items-center gap-1 bg-slate-800/50 rounded-lg p-0.5 w-fit">
+                    {(['points', 'name'] as const).map((s) => (
+                      <button key={s} onClick={() => setPlayerSort(s)}
+                        className={`text-xs px-3 py-1.5 rounded-md font-medium transition-all ${playerSort === s ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                        {s === 'points' ? 'Bodovi' : 'Ime A–Ž'}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Grid */}
+                  {lPlayers.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+                      <div className="w-16 h-16 rounded-2xl bg-slate-800 flex items-center justify-center mb-4">
+                        <Users className="w-8 h-8 text-slate-600" />
+                      </div>
+                      <p className="text-white font-medium mb-1.5">Nema igrača</p>
+                    </div>
+                  ) : filtered.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12 text-center">
+                      <Search className="w-6 h-6 text-slate-600 mb-2" />
+                      <p className="text-sm text-slate-400">Nema rezultata za "{playerSearch}"</p>
+                      <button onClick={() => setPlayerSearch('')} className="text-xs text-orange-400 hover:text-orange-300 mt-1.5 transition-colors">Poništi pretragu</button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                      {filtered.map((lp: any, idx: number) => {
+                        const standing = phaseStandings.find((s: any) => s.playerId === lp.playerId);
+                        return (
+                          <div key={lp.id} style={{ animationDelay: `${idx * 30}ms` }}
+                            className="card p-4 flex flex-col items-center text-center gap-2.5 cursor-pointer transition-all duration-150 hover:bg-slate-800/60 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/20"
+                            onClick={() => setSelectedPlayer(lp)}
+                          >
+                            <Avatar name={lp.player?.fullName} player={lp.player} size="lg" />
+                            <div className="w-full min-w-0">
+                              <p className="text-sm font-semibold text-white leading-tight truncate">{lp.player?.fullName}</p>
+                              {standing ? (
+                                <p className="text-xs text-slate-400 mt-1">
+                                  <span className="text-orange-400 font-bold">{standing.points}</span> bod.
+                                  <span className="mx-1.5 text-slate-600">·</span>
+                                  {standing.played} meč.
+                                </p>
+                              ) : (
+                                <p className="text-xs text-slate-600 mt-1">Bez mečeva</p>
+                              )}
+                            </div>
+                            <button onClick={(e) => { e.stopPropagation(); setSelectedPlayer(lp); }}
+                              className="w-full text-xs text-slate-400 hover:text-orange-400 font-medium py-1.5 rounded-lg hover:bg-orange-500/10 transition-all">
+                              Detalji →
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* ── MATRICA (round-robin phases only) ── */}
+            {!phaseLoading && !isPlayoff && phaseTab === 'matrica' && (() => {
+              /* Players sorted by phase standings position */
+              const sortedPlayers = phaseStandings.map((s: any) => ({ playerId: s.playerId, player: s.player }));
+
+              const getCellData = (aId: string, bId: string) => {
+                if (aId === bId) return null;
+                const between = phaseFixtures.filter(
+                  (m: any) =>
+                    (m.homePlayerId === aId && m.awayPlayerId === bId) ||
+                    (m.homePlayerId === bId && m.awayPlayerId === aId),
+                );
+                const completed = between.filter((m: any) => m.status === 'completed' || m.status === 'walkover');
+                let status: 'not_played' | 'partial' | 'completed' | 'upcoming';
+                if (between.length === 0)        status = 'not_played';
+                else if (completed.length === 0) status = 'upcoming';
+                else if (completed.length >= 1)  status = 'completed';
+                else                             status = 'partial';
+                return { between, completed, status };
+              };
+
+              const allPairs: { aId: string; bId: string }[] = [];
+              for (let i = 0; i < sortedPlayers.length; i++)
+                for (let j = i + 1; j < sortedPlayers.length; j++)
+                  allPairs.push({ aId: sortedPlayers[i].playerId, bId: sortedPlayers[j].playerId });
+
+              const pairStats = {
+                completed:  allPairs.filter(p => getCellData(p.aId, p.bId)?.status === 'completed').length,
+                partial:    allPairs.filter(p => getCellData(p.aId, p.bId)?.status === 'partial').length,
+                not_played: allPairs.filter(p => getCellData(p.aId, p.bId)?.status === 'not_played').length,
+                upcoming:   allPairs.filter(p => getCellData(p.aId, p.bId)?.status === 'upcoming').length,
+                total:      allPairs.length,
+              };
+
+              const getCellOpacity = (aId: string, bId: string, status: string) => {
+                const inSpotlight = matrixHighlight === aId || matrixHighlight === bId;
+                const filterMatch = matrixFilter === 'all' || status === matrixFilter;
+                if (matrixHighlight && matrixFilter !== 'all') return (inSpotlight && filterMatch) ? 1 : 0.15;
+                if (matrixHighlight) return inSpotlight ? 1 : 0.2;
+                if (matrixFilter !== 'all') return filterMatch ? 1 : 0.18;
+                return 1;
+              };
+
+              const CellBox = ({ aId, bId }: { aId: string; bId: string }) => {
+                if (aId === bId) {
+                  const isDimmed = matrixHighlight !== null || matrixFilter !== 'all';
+                  return (
+                    <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 transition-opacity duration-200"
+                      style={{ backgroundColor: 'var(--bg-secondary)', opacity: isDimmed ? 0.12 : 0.5 }}>
+                      <span className="text-slate-600 text-[10px]">—</span>
+                    </div>
+                  );
+                }
+                const cell = getCellData(aId, bId);
+                if (!cell) return null;
+                const opacity = getCellOpacity(aId, bId, cell.status);
+                const inSpotlight = matrixHighlight === aId || matrixHighlight === bId;
+                let bg = '', border = '', label = '';
+                if (cell.status === 'not_played')      { bg = 'rgba(15,23,42,0.7)';       border = '1px dashed rgba(71,85,105,0.55)'; label = ''; }
+                else if (cell.status === 'upcoming')   { bg = 'rgba(99,102,241,0.12)';    border = '1px solid rgba(99,102,241,0.28)'; label = '⏳'; }
+                else if (cell.status === 'partial')    { bg = 'rgba(245,158,11,0.14)';    border = '1px solid rgba(245,158,11,0.32)'; label = '½'; }
+                else                                   { bg = 'rgba(34,197,94,0.14)';     border = '1px solid rgba(34,197,94,0.3)';  label = '✓'; }
+                const aName = sortedPlayers.find((p: any) => p.playerId === aId)?.player?.fullName || '';
+                const bName = sortedPlayers.find((p: any) => p.playerId === bId)?.player?.fullName || '';
+                const tipMap: Record<string, string> = { not_played: 'Nije odigrano', upcoming: 'Zakazano', partial: 'Delimično', completed: 'Završeno' };
+                return (
+                  <button onClick={() => setMatrixCell({ aId, bId })} title={`${aName} vs ${bName} · ${tipMap[cell.status]}`}
+                    className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 cursor-pointer transition-all duration-150 hover:brightness-125 hover:scale-110 active:scale-95 ${
+                      cell.status === 'completed' ? 'text-emerald-400 text-xs font-bold' :
+                      cell.status === 'partial'   ? 'text-amber-400 text-[10px] font-bold' :
+                      cell.status === 'upcoming'  ? 'text-indigo-400 text-[10px]' : 'text-slate-700 text-xs'
+                    }`}
+                    style={{ backgroundColor: bg, border: inSpotlight ? '1.5px solid rgba(249,115,22,0.55)' : border, opacity }}>
+                    {label}
+                  </button>
+                );
+              };
+
+              /* modal */
+              const cellModal = matrixCell ? (() => {
+                const { aId, bId } = matrixCell;
+                const aPlayer = sortedPlayers.find((p: any) => p.playerId === aId);
+                const bPlayer = sortedPlayers.find((p: any) => p.playerId === bId);
+                const cell = getCellData(aId, bId);
+                if (!cell) return null;
+                const aName = aPlayer?.player?.fullName || '?';
+                const bName = bPlayer?.player?.fullName || '?';
+                const accent =
+                  cell.status === 'completed' ? { bg: 'rgba(34,197,94,0.09)',  border: 'rgba(34,197,94,0.22)',  text: '#4ade80' } :
+                  cell.status === 'partial'   ? { bg: 'rgba(245,158,11,0.09)', border: 'rgba(245,158,11,0.24)', text: '#fbbf24' } :
+                  cell.status === 'upcoming'  ? { bg: 'rgba(99,102,241,0.09)', border: 'rgba(99,102,241,0.22)', text: '#818cf8' } :
+                                                { bg: 'rgba(51,65,85,0.35)',   border: 'rgba(71,85,105,0.4)',   text: '#94a3b8' };
+                const statusLabel =
+                  cell.status === 'completed' ? '✓ Završeno' :
+                  cell.status === 'upcoming'  ? 'Na čekanju' :
+                  cell.status === 'partial'   ? 'Delimično' : 'Nije odigrano';
+                const MatchRow = ({ m }: { m: any }) => {
+                  const done = m.status === 'completed' || m.status === 'walkover';
+                  const aIsHome = m.homePlayerId === aId;
+                  const homeN = aIsHome ? aName : bName;
+                  const awayN = aIsHome ? bName : aName;
+                  const aScore = aIsHome ? m.homeSets : m.awaySets;
+                  const bScore = aIsHome ? m.awaySets : m.homeSets;
+                  const aWon = done && aScore > bScore;
+                  const bWon = done && bScore > aScore;
+                  return (
+                    <div className="rounded-xl overflow-hidden" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                      <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">R{m.roundNumber || 1}</span>
+                        {done && <span className={`badge text-[10px] ${aWon ? 'badge-win' : bWon ? 'badge-loss' : 'badge-draw'}`}>{aWon ? 'Pobeda A' : bWon ? 'Pobeda B' : 'Remi'}</span>}
+                      </div>
+                      <div className="flex items-center gap-2 px-3 pb-3">
+                        <div className="flex-1 flex items-center gap-2 min-w-0">
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0" style={{ backgroundColor: 'rgba(249,115,22,0.15)', color: '#f97316' }}>DOM</span>
+                          <span className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{homeN}</span>
+                        </div>
+                        <div className="shrink-0 text-center min-w-[52px]">
+                          {done ? <span className="font-mono font-bold text-base tabular-nums" style={{ color: 'var(--text-primary)' }}>{aScore} : {bScore}</span>
+                                : <span className="text-xs font-medium text-slate-500">vs</span>}
+                        </div>
+                        <div className="flex-1 flex items-center justify-end gap-2 min-w-0">
+                          <span className="text-sm font-semibold truncate text-right" style={{ color: 'var(--text-primary)' }}>{awayN}</span>
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0" style={{ backgroundColor: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>GOS</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                };
+                return (
+                  <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 animate-fade-in" onClick={() => setMatrixCell(null)}>
+                    <div className="card w-full max-w-md animate-scale-in rounded-2xl max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                      <div className="px-5 pt-5 pb-4" style={{ borderBottom: '1px solid var(--border)' }}>
+                        <div className="flex justify-end mb-3">
+                          <button onClick={() => setMatrixCell(null)} className="p-1.5 rounded-xl hover:bg-slate-700 transition-colors" style={{ color: 'var(--text-secondary)' }}><X className="w-4 h-4" /></button>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
+                            <Avatar name={aName} player={aPlayer?.player} size="lg" />
+                            <span className="text-sm font-bold text-center truncate w-full" style={{ color: 'var(--text-primary)' }}>{aName}</span>
+                          </div>
+                          <div className="flex flex-col items-center gap-2 shrink-0">
+                            <span className="text-[11px] font-black uppercase tracking-widest" style={{ color: 'var(--text-secondary)' }}>vs</span>
+                            <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full whitespace-nowrap" style={{ backgroundColor: accent.bg, border: `1px solid ${accent.border}`, color: accent.text }}>{statusLabel}</span>
+                          </div>
+                          <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
+                            <Avatar name={bName} player={bPlayer?.player} size="lg" />
+                            <span className="text-sm font-bold text-center truncate w-full" style={{ color: 'var(--text-primary)' }}>{bName}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="px-5 py-4 space-y-3">
+                        {cell.status === 'not_played' && <p className="text-center text-sm py-2" style={{ color: 'var(--text-secondary)' }}>Ovaj par još nije igrao.</p>}
+                        {cell.between.map((m: any) => <MatchRow key={m.id} m={m} />)}
+                        {(cell.status === 'not_played' || cell.status === 'upcoming' || cell.status === 'partial') && canEdit && (
+                          <button onClick={() => { setMatrixCell(null); setPhaseTab('raspored'); }}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all hover:brightness-110 mt-1"
+                            style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+                            {cell.status === 'not_played' || cell.status === 'upcoming' ? 'Idi na Raspored' : 'Unesi rezultat'}
+                            <ChevronRight className="w-4 h-4 shrink-0" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })() : null;
+
+              const mobilePlayerId = matrixMobilePlayer || (sortedPlayers[0]?.playerId ?? '');
+              const mobileOpponents = sortedPlayers
+                .filter((p: any) => p.playerId !== mobilePlayerId)
+                .map((p: any) => ({ lp: p, cell: getCellData(mobilePlayerId, p.playerId) }))
+                .sort((a, b) => {
+                  const order: Record<string, number> = { not_played: 0, partial: 1, upcoming: 2, completed: 3 };
+                  return (order[a.cell?.status ?? 'not_played'] ?? 0) - (order[b.cell?.status ?? 'not_played'] ?? 0);
+                });
+
+              if (sortedPlayers.length < 2) {
+                return (<div className="animate-fade-in-up"><EmptyState icon={<Grid3x3 className="w-6 h-6" />} title="Nema dovoljno igrača" desc="Nema igrača u ovoj fazi" small />{cellModal}</div>);
+              }
+
+              const legendItems = [
+                { id: 'completed' as const, label: 'Završeno',  dotBg: 'rgba(34,197,94,0.4)',   dotBorder: 'rgba(34,197,94,0.6)',   count: pairStats.completed },
+                { id: 'upcoming'  as const, label: 'Zakazano',  dotBg: 'rgba(99,102,241,0.35)', dotBorder: 'rgba(99,102,241,0.6)', count: pairStats.upcoming  },
+                { id: 'partial'   as const, label: 'Delimično', dotBg: 'rgba(245,158,11,0.4)',  dotBorder: 'rgba(245,158,11,0.6)', count: pairStats.partial   },
+                { id: 'not_played' as const, label: 'Nije',     dotBg: 'rgba(51,65,85,0.6)',    dotBorder: 'rgba(71,85,105,0.5)',  count: pairStats.not_played },
+              ];
+              const anyActive = matrixFilter !== 'all' || matrixHighlight !== null;
+
+              return (
+                <div className="animate-fade-in-up space-y-4">
+                  {/* Mobile legend filter */}
+                  <div className="flex gap-2 items-center overflow-x-auto pb-1 md:hidden" style={{ scrollbarWidth: 'none' }}>
+                    {legendItems.map(item => {
+                      const active = matrixFilter === item.id;
+                      return (
+                        <button key={item.id} onClick={() => setMatrixFilter(active ? 'all' : item.id)}
+                          className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium transition-all shrink-0"
+                          style={{ backgroundColor: active ? 'rgba(71,85,105,0.55)' : 'var(--bg-secondary)', border: active ? '1px solid rgba(100,116,139,0.7)' : '1px solid var(--border)', color: active ? '#f1f5f9' : 'var(--text-secondary)', opacity: matrixFilter !== 'all' && !active ? 0.55 : 1 }}>
+                          <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: item.dotBg, border: `1px solid ${item.dotBorder}` }} />
+                          {item.label}
+                          {item.count > 0 && <span className="text-[10px] opacity-70">{item.count}</span>}
+                        </button>
+                      );
+                    })}
+                    {anyActive && (
+                      <button onClick={() => { setMatrixFilter('all'); setMatrixHighlight(null); }}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs transition-all hover:text-white shrink-0"
+                        style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+                        <X className="w-3 h-3" /> Reset
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Desktop card */}
+                  <div className="card hidden md:block overflow-hidden">
+                    <div className="px-5 pt-4 pb-3 flex flex-wrap gap-2 items-center" style={{ borderBottom: '1px solid var(--border)' }}>
+                      {legendItems.map(item => {
+                        const active = matrixFilter === item.id;
+                        return (
+                          <button key={`dl-${item.id}`} onClick={() => setMatrixFilter(active ? 'all' : item.id)}
+                            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
+                            style={{ backgroundColor: active ? 'rgba(71,85,105,0.55)' : 'var(--bg-secondary)', border: active ? '1px solid rgba(100,116,139,0.7)' : '1px solid var(--border)', color: active ? '#f1f5f9' : 'var(--text-secondary)', opacity: matrixFilter !== 'all' && !active ? 0.55 : 1 }}>
+                            <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: item.dotBg, border: `1px solid ${item.dotBorder}` }} />
+                            {item.label}
+                            {item.count > 0 && <span className="text-[10px] opacity-70">{item.count}</span>}
+                          </button>
+                        );
+                      })}
+                      {anyActive && (
+                        <button onClick={() => { setMatrixFilter('all'); setMatrixHighlight(null); }}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs transition-all hover:text-white"
+                          style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+                          <X className="w-3 h-3" /> Reset
+                        </button>
+                      )}
+                    </div>
+                    {/* Column headers */}
+                    <div className="px-5 pt-4 overflow-x-auto pb-4">
+                      <div className="flex items-end gap-1 mb-1.5" style={{ paddingLeft: '10rem' }}>
+                        {sortedPlayers.map((lp: any) => {
+                          const isCol = matrixHighlight === lp.playerId;
+                          return (
+                            <button key={lp.playerId} onClick={() => setMatrixHighlight(matrixHighlight === lp.playerId ? null : lp.playerId)}
+                              className="w-10 flex flex-col items-center transition-all duration-200 hover:opacity-100"
+                              style={{ opacity: matrixHighlight && !isCol ? 0.3 : isCol ? 1 : 0.75 }}
+                              title={lp.player?.fullName}>
+                              <Avatar name={lp.player?.fullName} player={lp.player} size="sm" />
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {/* Rows */}
+                      {sortedPlayers.map((rowPlayer: any) => {
+                        const rowName = rowPlayer.player?.fullName || rowPlayer.playerId;
+                        const isRowHL = matrixHighlight === rowPlayer.playerId;
+                        const labelDim = matrixHighlight && !isRowHL;
+                        return (
+                          <div key={rowPlayer.playerId} className="flex items-center gap-1 mb-1">
+                            <button onClick={() => setMatrixHighlight(matrixHighlight === rowPlayer.playerId ? null : rowPlayer.playerId)}
+                              className="flex items-center gap-2 shrink-0 text-left pr-2 transition-all hover:opacity-100"
+                              style={{ width: '10rem', opacity: labelDim ? 0.28 : 1 }}>
+                              <Avatar name={rowName} player={rowPlayer.player} size="sm" />
+                              <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{rowName}</span>
+                            </button>
+                            {sortedPlayers.map((colPlayer: any) => (
+                              <CellBox key={colPlayer.playerId} aId={rowPlayer.playerId} bId={colPlayer.playerId} />
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Mobile: player focus */}
+                  <div className="md:hidden space-y-3">
+                    <div className="relative">
+                      <select value={mobilePlayerId} onChange={e => setMatrixMobilePlayer(e.target.value)} className="input-field w-full pr-8 appearance-none">
+                        {sortedPlayers.map((p: any) => (
+                          <option key={p.playerId} value={p.playerId}>{p.player?.fullName || p.playerId}</option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none" style={{ color: 'var(--text-secondary)' }} />
+                    </div>
+                    <div className="space-y-2">
+                      {mobileOpponents.map(({ lp, cell }) => {
+                        if (!cell) return null;
+                        const statusColor = cell.status === 'completed' ? '#4ade80' : cell.status === 'upcoming' ? '#818cf8' : cell.status === 'partial' ? '#fbbf24' : '#475569';
+                        const statusLabel = cell.status === 'completed' ? 'Završeno' : cell.status === 'upcoming' ? 'Zakazano' : cell.status === 'partial' ? 'Delimično' : 'Nije';
+                        return (
+                          <button key={lp.playerId} onClick={() => setMatrixCell({ aId: mobilePlayerId, bId: lp.playerId })}
+                            className="w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all active:scale-[0.98] hover:brightness-110"
+                            style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                            <Avatar name={lp.player?.fullName} player={lp.player} size="sm" />
+                            <span className="flex-1 text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{lp.player?.fullName}</span>
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ color: statusColor, backgroundColor: `${statusColor}18`, border: `1px solid ${statusColor}40` }}>{statusLabel}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Stats footer */}
+                  <div className="flex items-center gap-4 px-1">
+                    {[
+                      { label: 'Završeno',  value: pairStats.completed,  color: 'text-emerald-400' },
+                      { label: 'Nije',      value: pairStats.not_played, color: 'text-slate-400'   },
+                      { label: 'Ukupno',    value: pairStats.total,      color: 'text-white'       },
+                    ].map(s => (
+                      <div key={s.label} className="flex items-baseline gap-1.5">
+                        <span className={`text-sm font-bold tabular-nums ${s.color}`}>{s.value}</span>
+                        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{s.label}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {cellModal}
+                </div>
+              );
+            })()}
 
             {/* ── PLAYOFF BRACKET ── */}
-            {!phaseLoading && isPlayoff && (
-              <div className="animate-fade-in-up">
+            {!phaseLoading && isPlayoff && phaseTab === 'bracket' && (
+              <div className="animate-fade-in-up space-y-6">
+
                 {/* Desktop bracket */}
                 <div className="hidden md:block">
-                  <div className="max-w-3xl mx-auto px-6 py-4">
+                  <div className="max-w-3xl mx-auto px-6 py-4 space-y-6">
+
                     {/* Semifinal row */}
-                    <div className="grid grid-cols-2 gap-8 mb-6">
+                    <div className="grid grid-cols-2 gap-8">
                       <PlayoffCard match={sf1} label="Polufinale 1" />
                       <PlayoffCard match={sf2} label="Polufinale 2" />
                     </div>
 
-                    {/* Connector lines */}
-                    <div className="relative h-8 mb-6">
+                    {/* Connector lines → Final */}
+                    <div className="relative h-8">
                       <div className="absolute left-1/4 right-1/4 top-0 h-px" style={{ backgroundColor: 'var(--border)' }} />
                       <div className="absolute left-1/4 top-0 bottom-0 w-px" style={{ backgroundColor: 'var(--border)' }} />
                       <div className="absolute right-1/4 top-0 bottom-0 w-px" style={{ backgroundColor: 'var(--border)' }} />
@@ -3579,6 +4531,18 @@ export default function LeagueDetailPage() {
                     {/* Final */}
                     <div className="max-w-sm mx-auto">
                       <PlayoffCard match={final} label="🏆 Finale" />
+                    </div>
+
+                    {/* Divider */}
+                    <div className="flex items-center gap-3 pt-2">
+                      <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
+                      <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-600">Meč za 3. mesto</span>
+                      <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
+                    </div>
+
+                    {/* Third-place match */}
+                    <div className="max-w-sm mx-auto">
+                      <PlayoffCard match={thirdPlace} label="🥉 3. Mesto" />
                     </div>
                   </div>
                 </div>
@@ -3598,14 +4562,22 @@ export default function LeagueDetailPage() {
                     <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
                   </div>
                   <PlayoffCard match={final} label="🏆 Finale" />
+                  <div className="flex items-center gap-3 pt-2">
+                    <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
+                    <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-600">3. mesto</span>
+                    <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
+                  </div>
+                  <PlayoffCard match={thirdPlace} label="🥉 3. Mesto" />
                 </div>
+
               </div>
             )}
 
-            <PhaseMatchModal />
           </div>
         );
-      })()}
+          })()}
+        </div>
+      )}
 
       {/* ══════════════════ MATRICA ══════════════════════════════ */}
       {tab === 'matrica' && !isEuroleague && (() => {
@@ -3863,7 +4835,7 @@ export default function LeagueDetailPage() {
                   <div className="flex items-center gap-3">
                     {/* Player A */}
                     <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-                      <Avatar name={aName} size="lg" />
+                      <Avatar name={aName} player={aPlayer?.player} size="lg" />
                       <span className="text-sm font-bold text-center truncate w-full" style={{ color: 'var(--text-primary)' }}>
                         {aName}
                       </span>
@@ -3887,7 +4859,7 @@ export default function LeagueDetailPage() {
 
                     {/* Player B */}
                     <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-                      <Avatar name={bName} size="lg" />
+                      <Avatar name={bName} player={bPlayer?.player} size="lg" />
                       <span className="text-sm font-bold text-center truncate w-full" style={{ color: 'var(--text-primary)' }}>
                         {bName}
                       </span>
@@ -4067,7 +5039,7 @@ export default function LeagueDetailPage() {
                           style={{ opacity: matrixHighlight && !isCol ? 0.3 : isCol ? 1 : 0.75 }}
                           title={lp.player?.fullName}
                         >
-                          <Avatar name={lp.player?.fullName} size="sm" />
+                          <Avatar name={lp.player?.fullName} player={lp.player} size="sm" />
                         </button>
                       );
                     })}
@@ -4075,7 +5047,7 @@ export default function LeagueDetailPage() {
 
                   {/* Rows */}
                   {sortedPlayers.map((rowPlayer: any) => {
-                    const rowName   = rowPlayer.player?.fullName || rowPlayer.playerId;
+                    const rowName = rowPlayer.player?.fullName || rowPlayer.playerId;
                     const isRowHL   = matrixHighlight === rowPlayer.playerId;
                     const isColHL   = false; // column highlight handled per-cell
                     const labelDim  = matrixHighlight && !isRowHL;
@@ -4095,7 +5067,7 @@ export default function LeagueDetailPage() {
                           className="flex items-center gap-2 shrink-0 text-left pr-2 transition-all hover:opacity-100"
                           style={{ width: '10rem', opacity: labelDim ? 0.28 : 1 }}
                         >
-                          <Avatar name={rowName} size="sm" />
+                          <Avatar name={rowName} player={rowPlayer.player} size="sm" />
                           <span
                             className="text-xs font-medium truncate"
                             style={{ color: isRowHL ? '#f97316' : 'var(--text-secondary)', maxWidth: '6.5rem' }}
@@ -4174,7 +5146,7 @@ export default function LeagueDetailPage() {
                       className="w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all active:scale-[0.98] hover:brightness-110"
                       style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
                     >
-                      <Avatar name={name} size="md" />
+                      <Avatar name={name} player={lp.player} size="md" />
                       <span className="flex-1 text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{name}</span>
                       {statusEl}
                     </button>

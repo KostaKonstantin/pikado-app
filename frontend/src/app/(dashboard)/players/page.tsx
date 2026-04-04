@@ -8,49 +8,7 @@ import {
   Users, Plus, Search, Trash2, X, Loader2,
   LayoutGrid, List, Check,
 } from 'lucide-react';
-
-/* ─── pixel avatar helpers ──────────────────────────────────────── */
-
-function avatarRarity(name: string): 'common' | 'rare' | 'epic' | 'legendary' {
-  const h = Array.from(name || '').reduce((acc, c) => ((acc * 31) + c.charCodeAt(0)) & 0xffff, 7) % 100;
-  if (h >= 97) return 'legendary';
-  if (h >= 85) return 'epic';
-  if (h >= 60) return 'rare';
-  return 'common';
-}
-
-const RARITY_RING: Record<string, string> = {
-  legendary: 'ring-2 ring-yellow-400/70 shadow-lg shadow-yellow-400/20',
-  epic:      'ring-2 ring-violet-500/60 shadow-md shadow-violet-500/15',
-  rare:      'ring-2 ring-blue-400/50',
-  common:    '',
-};
-const RARITY_DOT: Record<string, string> = {
-  legendary: 'bg-yellow-400',
-  epic:      'bg-violet-400',
-  rare:      'bg-blue-400',
-  common:    '',
-};
-
-function PlayerPixelAvatar({
-  name, size = 'md',
-}: { name: string; size?: 'sm' | 'md' | 'lg' }) {
-  const rarity = avatarRarity(name);
-  const src = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name || '?')}`;
-  const sz = size === 'lg' ? 'w-16 h-16' : size === 'md' ? 'w-12 h-12' : 'w-9 h-9';
-  const rounded = size === 'sm' ? 'rounded-full' : 'rounded-2xl';
-  return (
-    <div className={`relative ${sz} ${rounded} bg-slate-800 overflow-hidden shrink-0 ${RARITY_RING[rarity]}`}>
-      <img src={src} alt={name} className="w-full h-full object-cover scale-110" />
-      {rarity === 'legendary' && (
-        <div className="absolute inset-0 animate-shimmer pointer-events-none" />
-      )}
-      {RARITY_DOT[rarity] && (
-        <span className={`absolute bottom-0.5 right-0.5 w-2 h-2 rounded-full ${RARITY_DOT[rarity]} border border-slate-900`} />
-      )}
-    </div>
-  );
-}
+import { DartAvatar } from '@/components/ui/dart-avatar';
 
 /* ─── skeleton cards ────────────────────────────────────────────── */
 function SkeletonCard() {
@@ -249,7 +207,7 @@ export default function PlayersPage() {
                   </div>
 
                   {/* avatar */}
-                  <PlayerPixelAvatar name={p.fullName} size="md" />
+                  <DartAvatar name={p.fullName} size="md" />
 
                   {/* name */}
                   <div className="w-full min-w-0">
@@ -300,7 +258,7 @@ export default function PlayersPage() {
                   </div>
 
                   {/* avatar */}
-                  <PlayerPixelAvatar name={p.fullName} size="sm" />
+                  <DartAvatar name={p.fullName} size="sm" />
 
                   {/* name + meta */}
                   <div className="flex-1 min-w-0">

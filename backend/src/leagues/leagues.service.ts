@@ -218,8 +218,8 @@ export class LeaguesService {
 
     const eveningIds = new Set<string>();
     for (const m of eveningPending) {
-      eveningIds.add(m.homePlayerId);
-      eveningIds.add(m.awayPlayerId);
+      eveningIds.add(m.homePlayerId!);
+      eveningIds.add(m.awayPlayerId!);
     }
 
     for (const sub of substitutions) {
@@ -237,7 +237,7 @@ export class LeaguesService {
   private buildPairTotalCountMap(matches: LeagueMatch[]): Map<string, number> {
     const map = new Map<string, number>();
     for (const m of matches) {
-      const key = pairKey(m.homePlayerId, m.awayPlayerId);
+      const key = pairKey(m.homePlayerId!, m.awayPlayerId!);
       map.set(key, (map.get(key) ?? 0) + 1);
     }
     return map;
@@ -295,14 +295,14 @@ export class LeaguesService {
     const handled = new Set<string>();
 
     for (const match of eveningPending) {
-      const homeIsAbsent = absentSet.has(match.homePlayerId);
-      const awayIsAbsent = absentSet.has(match.awayPlayerId);
+      const homeIsAbsent = absentSet.has(match.homePlayerId!);
+      const awayIsAbsent = absentSet.has(match.awayPlayerId!);
       if (!homeIsAbsent && !awayIsAbsent) continue;
 
-      willPostpone.push({ homePlayerId: match.homePlayerId, awayPlayerId: match.awayPlayerId });
+      willPostpone.push({ homePlayerId: match.homePlayerId!, awayPlayerId: match.awayPlayerId! });
 
-      const newHomeId = homeIsAbsent ? substituteMap.get(match.homePlayerId)! : match.homePlayerId;
-      const newAwayId = awayIsAbsent ? substituteMap.get(match.awayPlayerId)! : match.awayPlayerId;
+      const newHomeId = homeIsAbsent ? substituteMap.get(match.homePlayerId!)! : match.homePlayerId!;
+      const newAwayId = awayIsAbsent ? substituteMap.get(match.awayPlayerId!)! : match.awayPlayerId!;
       if (newHomeId === newAwayId) continue;
 
       const key = pairKey(newHomeId, newAwayId);
@@ -314,7 +314,7 @@ export class LeaguesService {
 
       if (movable) {
         // A pending match for this pair already exists elsewhere — just reschedule it (count unchanged)
-        willMove.push({ homePlayerId: movable.homePlayerId, awayPlayerId: movable.awayPlayerId, fromEvening: movable.sessionNumber });
+        willMove.push({ homePlayerId: movable.homePlayerId!, awayPlayerId: movable.awayPlayerId!, fromEvening: movable.sessionNumber });
       } else if (totalCount < maxAllowed) {
         willCreate.push({ homePlayerId: newHomeId, awayPlayerId: newAwayId, valid: true, existingCount: totalCount, maxAllowed });
       } else {
@@ -380,16 +380,16 @@ export class LeaguesService {
     const handled = new Set<string>();
 
     for (const match of eveningPending) {
-      const homeIsAbsent = absentSet.has(match.homePlayerId);
-      const awayIsAbsent = absentSet.has(match.awayPlayerId);
+      const homeIsAbsent = absentSet.has(match.homePlayerId!);
+      const awayIsAbsent = absentSet.has(match.awayPlayerId!);
       if (!homeIsAbsent && !awayIsAbsent) continue;
 
       // Postpone the original match — the absent player still owes this game
       await this.lmRepo.update(match.id, { isPostponed: true });
       postponed++;
 
-      const newHomeId = homeIsAbsent ? substituteMap.get(match.homePlayerId)! : match.homePlayerId;
-      const newAwayId = awayIsAbsent ? substituteMap.get(match.awayPlayerId)! : match.awayPlayerId;
+      const newHomeId = homeIsAbsent ? substituteMap.get(match.homePlayerId!)! : match.homePlayerId!;
+      const newAwayId = awayIsAbsent ? substituteMap.get(match.awayPlayerId!)! : match.awayPlayerId!;
       if (newHomeId === newAwayId) continue;
 
       const key = pairKey(newHomeId, newAwayId);
@@ -488,8 +488,8 @@ export class LeaguesService {
     });
     const postponedCount = new Map<string, number>();
     for (const m of postponedMatches) {
-      postponedCount.set(m.homePlayerId, (postponedCount.get(m.homePlayerId) ?? 0) + 1);
-      postponedCount.set(m.awayPlayerId, (postponedCount.get(m.awayPlayerId) ?? 0) + 1);
+      postponedCount.set(m.homePlayerId!, (postponedCount.get(m.homePlayerId!) ?? 0) + 1);
+      postponedCount.set(m.awayPlayerId!, (postponedCount.get(m.awayPlayerId!) ?? 0) + 1);
     }
 
     const statsMap = new Map<string, {
@@ -520,8 +520,8 @@ export class LeaguesService {
     const h2hPoints = new Map<string, number>();
 
     for (const m of matches) {
-      const home = statsMap.get(m.homePlayerId);
-      const away = statsMap.get(m.awayPlayerId);
+      const home = statsMap.get(m.homePlayerId!);
+      const away = statsMap.get(m.awayPlayerId!);
       if (!home || !away) continue;
 
       home.played++;

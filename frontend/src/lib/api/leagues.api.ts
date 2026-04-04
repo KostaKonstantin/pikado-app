@@ -59,8 +59,8 @@ export const leaguesApi = {
 
   // ─── Sessions ─────────────────────────────────────────────────────────────
 
-  getSessions: (clubId: string, leagueId: string) =>
-    api.get(`/clubs/${clubId}/leagues/${leagueId}/sessions`).then((r) => r.data),
+  getSessions: (clubId: string, leagueId: string, phaseId?: string) =>
+    api.get(`/clubs/${clubId}/leagues/${leagueId}/sessions`, { params: phaseId ? { phaseId } : undefined }).then((r) => r.data),
 
   getSession: (clubId: string, leagueId: string, sessionId: string) =>
     api.get(`/clubs/${clubId}/leagues/${leagueId}/sessions/${sessionId}`).then((r) => r.data),
