@@ -6,7 +6,7 @@ import { playersApi } from '@/lib/api/players.api';
 import { Topbar } from '@/components/layout/topbar';
 import {
   Users, Plus, Search, Trash2, X, Loader2,
-  LayoutGrid, List, Check,
+  LayoutGrid, List, Check, ChevronRight,
 } from 'lucide-react';
 import { DartAvatar } from '@/components/ui/dart-avatar';
 
@@ -22,12 +22,14 @@ function SkeletonCard() {
 }
 function SkeletonRow() {
   return (
-    <div className="card px-4 py-3 flex items-center gap-3 animate-pulse">
-      <div className="skeleton w-9 h-9 rounded-full shrink-0" />
-      <div className="flex-1 space-y-1.5">
-        <div className="skeleton h-3.5 w-32 rounded" />
-        <div className="skeleton h-2.5 w-20 rounded" />
+    <div className="px-5 py-3.5 flex items-center gap-4 animate-pulse">
+      <div className="skeleton w-6 h-4 rounded shrink-0" />
+      <div className="skeleton w-12 h-12 rounded-full shrink-0" />
+      <div className="flex-1 space-y-2">
+        <div className="skeleton h-3.5 w-36 rounded" />
+        <div className="skeleton h-2.5 w-24 rounded" />
       </div>
+      <div className="skeleton h-3 w-16 rounded" />
     </div>
   );
 }
@@ -151,8 +153,8 @@ export default function PlayersPage() {
               {Array.from({ length: 10 }).map((_, i) => <SkeletonCard key={i} />)}
             </div>
           ) : (
-            <div className="space-y-2">
-              {Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} />)}
+            <div className="card overflow-hidden divide-y" style={{ borderColor: 'var(--border)', divideColor: 'var(--border)' }}>
+              {Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} />)}
             </div>
           )
         ) : players.length === 0 ? (
@@ -235,45 +237,65 @@ export default function PlayersPage() {
         ) : (
 
           /* ── LIST VIEW ─────────────────────────────────────── */
-          <div className="space-y-1.5 animate-fade-in">
+          <div className="card overflow-hidden animate-fade-in" style={{ padding: 0 }}>
             {players.map((p, i) => {
               const isSelected = selectedIds.has(p.id);
               return (
                 <div
                   key={p.id}
-                  style={{ animationDelay: `${i * 20}ms` }}
-                  className={`card px-4 py-3 flex items-center gap-3 cursor-pointer select-none
+                  style={{
+                    animationDelay: `${i * 18}ms`,
+                    borderBottom: i < players.length - 1 ? '1px solid var(--border)' : 'none',
+                    borderLeft: isSelected ? '3px solid #f97316' : '3px solid transparent',
+                    backgroundColor: isSelected ? 'rgba(249,115,22,0.05)' : undefined,
+                  }}
+                  className={`relative flex items-center gap-4 px-5 py-3.5 cursor-pointer select-none
                     transition-all duration-150 group animate-fade-in
-                    ${isSelected
-                      ? 'ring-1 ring-orange-500 bg-orange-500/[0.06]'
-                      : 'hover:bg-slate-800/60'}
+                    ${!isSelected ? 'hover:bg-slate-800/50' : ''}
                   `}
                   onClick={() => toggleSelect(p.id)}
                 >
-                  {/* checkbox */}
-                  <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all duration-150
-                    ${isSelected ? 'bg-orange-500 border-orange-500' : 'border-slate-600 opacity-0 group-hover:opacity-100'}
-                  `}>
-                    {isSelected && <Check className="w-2.5 h-2.5 text-white" />}
+                  {/* checkbox + row number */}
+                  <div className="flex items-center justify-center w-6 shrink-0">
+                    <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-all duration-150 absolute
+                      ${isSelected
+                        ? 'bg-orange-500 border-orange-500 opacity-100'
+                        : 'border-slate-600 opacity-0 group-hover:opacity-100'}
+                    `}>
+                      {isSelected && <Check className="w-2.5 h-2.5 text-white" />}
+                    </div>
+                    <span className={`text-xs font-mono tabular-nums transition-opacity duration-150
+                      ${isSelected ? 'opacity-0' : 'text-slate-600 group-hover:opacity-0'}
+                    `}>
+                      {String(i + 1).padStart(2, '0')}
+                    </span>
                   </div>
 
                   {/* avatar */}
-                  <DartAvatar name={p.fullName} size="sm" />
+                  <DartAvatar name={p.fullName} size="md" />
 
-                  {/* name + meta */}
+                  {/* name + badges */}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-white truncate">{p.fullName}</p>
-                    <p className="text-xs text-slate-500 truncate">
-                      {[p.nickname && `"${p.nickname}"`, p.country].filter(Boolean).join(' · ') || <span className="opacity-40">—</span>}
-                    </p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-bold text-white truncate leading-tight">{p.fullName}</p>
+                      {p.nickname && (
+                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0"
+                          style={{ backgroundColor: 'rgba(249,115,22,0.12)', color: '#fb923c', border: '1px solid rgba(249,115,22,0.22)' }}>
+                          "{p.nickname}"
+                        </span>
+                      )}
+                    </div>
+                    {p.country && (
+                      <p className="text-xs text-slate-500 mt-0.5 truncate">{p.country}</p>
+                    )}
                   </div>
 
                   {/* actions */}
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => handleDelete(p.id)}
                       disabled={deletingId === p.id}
-                      className="p-1.5 rounded-lg hover:bg-red-500/10 hover:text-red-400 text-slate-500 transition-all disabled:opacity-40"
+                      className="p-2 rounded-lg text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-40 opacity-0 group-hover:opacity-100"
                       title="Obriši"
                     >
                       {deletingId === p.id
@@ -282,10 +304,14 @@ export default function PlayersPage() {
                     </button>
                     <Link
                       href={`/players/${p.id}`}
-                      className="text-xs text-slate-400 hover:text-orange-400 font-medium px-2.5 py-1.5 rounded-lg hover:bg-orange-500/10 transition-all whitespace-nowrap"
                       onClick={(e) => e.stopPropagation()}
+                      className="flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all whitespace-nowrap"
+                      style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#f97316'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(249,115,22,0.35)'; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)'; }}
                     >
-                      Detalji →
+                      Profil
+                      <ChevronRight className="w-3 h-3" />
                     </Link>
                   </div>
                 </div>

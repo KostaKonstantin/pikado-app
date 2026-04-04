@@ -246,7 +246,8 @@ export default function LeagueDetailPage() {
   const [phaseFixtures,    setPhaseFixtures]    = useState<any[]>([]);
   const [phaseStandings,   setPhaseStandings]   = useState<any[]>([]);
   const [phaseLoading,     setPhaseLoading]     = useState(false);
-  const [advancingPhase,   setAdvancingPhase]   = useState(false);
+  const [advancingPhase,         setAdvancingPhase]         = useState(false);
+  const [showAdvancePhaseModal,  setShowAdvancePhaseModal]  = useState(false);
   const [phaseTab,         setPhaseTab]         = useState<'tabela' | 'raspored' | 'bracket' | 'igraci'>('tabela');
   const [phaseMatchModal,  setPhaseMatchModal]  = useState<any | null>(null);
   const [phaseHomeScore,   setPhaseHomeScore]   = useState(0);
@@ -2819,6 +2820,104 @@ export default function LeagueDetailPage() {
         );
       })()}
 
+      {/* ══ MODAL: EvroLiga — Napreduj u sledeću fazu ══════════ */}
+      {showAdvancePhaseModal && (() => {
+        const activePhase = phases.find((p: any) => p.id === activePhaseView);
+        const nextPhase   = phases.find((p: any) => p.phaseOrder === (activePhase?.phaseOrder ?? 0) + 1);
+
+        const phaseDesc: Record<number, { who: string; detail: string }> = {
+          2: { who: 'Igrači 9–20',         detail: 'iz Regularnog dela napreduju u Baraž' },
+          3: { who: 'Top 8 + Top 2 Barаž', detail: '8 iz Regularnog + 2 iz Baraža napreduju u Top 10' },
+          4: { who: 'Top 4',               detail: 'iz Top 10 napreduju u Playoff' },
+        };
+        const desc = nextPhase ? phaseDesc[nextPhase.phaseOrder] : null;
+
+        const doAdvance = async () => {
+          setShowAdvancePhaseModal(false);
+          setAdvancingPhase(true);
+          try {
+            const ps = await leaguesApi.advancePhase(club!.id, id);
+            setPhases(ps);
+            const next = ps.find((p: any) => p.status === 'active');
+            if (next) { setActivePhaseView(next.id); await loadPhaseData(next.id); setPhaseTab(next.type === 'knockout' ? 'bracket' : 'tabela'); }
+          } finally { setAdvancingPhase(false); }
+        };
+
+        return (
+          <Modal onClose={() => setShowAdvancePhaseModal(false)}>
+            {/* Header */}
+            <div className="flex items-start justify-between mb-5">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                  style={{ backgroundColor: 'rgba(249,115,22,0.12)', border: '1px solid rgba(249,115,22,0.25)' }}>
+                  <Trophy className="w-5 h-5 text-orange-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base leading-tight">Sledeća faza</h3>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>Završi trenutnu fazu i pokreni sledeću</p>
+                </div>
+              </div>
+              <button onClick={() => setShowAdvancePhaseModal(false)}
+                className="p-1.5 rounded-xl hover:bg-slate-700 transition-colors shrink-0"
+                style={{ color: 'var(--text-secondary)' }}>
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Phase transition arrow */}
+            <div className="flex items-center gap-2 mb-5">
+              <div className="flex-1 rounded-xl px-4 py-3 text-center"
+                style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                <p className="text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: 'var(--text-secondary)' }}>Trenutna</p>
+                <p className="text-sm font-bold text-white">{activePhase?.name ?? '—'}</p>
+              </div>
+              <ChevronRight className="w-5 h-5 shrink-0 text-orange-400" />
+              <div className="flex-1 rounded-xl px-4 py-3 text-center"
+                style={{ backgroundColor: 'rgba(249,115,22,0.07)', border: '1px solid rgba(249,115,22,0.25)' }}>
+                <p className="text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: '#f97316' }}>Sledeća</p>
+                <p className="text-sm font-bold text-white">{nextPhase?.name ?? '—'}</p>
+              </div>
+            </div>
+
+            {/* Who advances */}
+            {desc && (
+              <div className="rounded-xl px-4 py-3 mb-5 flex items-start gap-3"
+                style={{ backgroundColor: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)' }}>
+                <span className="text-amber-400 text-base shrink-0 leading-none mt-0.5">⚡</span>
+                <div>
+                  <p className="text-sm font-semibold text-amber-300">{desc.who}</p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>{desc.detail}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Warning */}
+            <div className="rounded-xl px-4 py-3 mb-6 flex items-start gap-3"
+              style={{ backgroundColor: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.18)' }}>
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                Ova akcija je <span className="font-semibold text-red-400">nepovratna</span>. Trenutna faza biće zatvorena i mečevi se više neće moći dodavati.
+              </p>
+            </div>
+
+            {/* Buttons */}
+            <div className="flex gap-2">
+              <button onClick={() => setShowAdvancePhaseModal(false)}
+                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium transition-all hover:brightness-110"
+                style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+                Otkaži
+              </button>
+              <button onClick={doAdvance}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:brightness-110 active:scale-[0.97]"
+                style={{ background: 'linear-gradient(135deg, #f97316, #ea580c)', boxShadow: '0 4px 14px rgba(249,115,22,0.30)' }}>
+                <ChevronRight className="w-4 h-4 shrink-0" />
+                Potvrdi
+              </button>
+            </div>
+          </Modal>
+        );
+      })()}
+
       {/* ══ MODAL: EvroLiga — Unesi Rezultat ══════════════════ */}
       {phaseMatchModal && (() => {
         const m = phaseMatchModal;
@@ -3451,16 +3550,7 @@ export default function LeagueDetailPage() {
               {canAdvance && (
                 <button
                   disabled={advancingPhase}
-                  onClick={async () => {
-                    if (!confirm(`Napredovati u sledeću fazu?`)) return;
-                    setAdvancingPhase(true);
-                    try {
-                      const ps = await leaguesApi.advancePhase(club!.id, id);
-                      setPhases(ps);
-                      const next = ps.find((p: any) => p.status === 'active');
-                      if (next) { setActivePhaseView(next.id); await loadPhaseData(next.id); setPhaseTab(next.type === 'knockout' ? 'bracket' : 'tabela'); }
-                    } finally { setAdvancingPhase(false); }
-                  }}
+                  onClick={() => setShowAdvancePhaseModal(true)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 transition-all disabled:opacity-50 shrink-0"
                 >
                   {advancingPhase ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ChevronRight className="w-3.5 h-3.5" />}
