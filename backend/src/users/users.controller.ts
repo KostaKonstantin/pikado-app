@@ -3,17 +3,25 @@ import {
   UseInterceptors, UploadedFile, BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname, join } from 'path';
+import { extname } from 'path';
+import { v2 as cloudinary } from 'cloudinary';
+import { CloudinaryStorage } from 'multer-storage-cloudinary';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 
-const AVATAR_STORAGE = diskStorage({
-  destination: (_req, _file, cb) => cb(null, join(process.cwd(), 'uploads', 'avatars')),
-  filename: (_req, file, cb) => {
-    const unique = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-    cb(null, `${unique}${extname(file.originalname)}`);
-  },
+const AVATAR_STORAGE = new CloudinaryStorage({
+  cloudinary: (() => {
+    cloudinary.config({
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key: process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET,
+    });
+    return cloudinary;
+  })(),
+  params: {
+    folder: 'pikado/avatars',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
+  } as any,
 });
 
 const IMAGE_FILTER = (_req: any, file: any, cb: any) => {
@@ -53,6 +61,6 @@ export class UsersController {
   }))
   uploadAvatar(@Request() req: any, @UploadedFile() file: any) {
     if (!file) throw new BadRequestException('Fajl nije priložen');
-    return this.usersService.updateAvatar(req.user.sub, `/uploads/avatars/${file.filename}`);
+    return this.usersService.updateAvatar(req.user.sub, file.path);
   }
 }

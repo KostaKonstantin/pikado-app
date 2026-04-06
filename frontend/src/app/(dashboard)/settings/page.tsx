@@ -105,7 +105,9 @@ function LogoUpload() {
   const [error, setError] = useState('');
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3099';
-  const logoSrc = club?.logoUrl ? `${API_URL}${club.logoUrl}` : null;
+  const logoSrc = club?.logoUrl
+    ? club.logoUrl.startsWith('http') ? club.logoUrl : `${API_URL}${club.logoUrl}`
+    : null;
   const initials = club?.name?.slice(0, 2).toUpperCase() || 'PK';
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
