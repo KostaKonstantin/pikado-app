@@ -292,7 +292,8 @@ export class EuroleagueService {
     }
 
     if (nextPhase.type === 'round_robin') {
-      const created = await this.fixtureService.generateFixtures(leagueId, nextPlayerIds, false, 'round');
+      // Baraž and Top 10 use Home/Away (double round-robin): each pair plays twice
+      const created = await this.fixtureService.generateFixtures(leagueId, nextPlayerIds, true, 'round');
       await Promise.all(created.map(m => this.matchRepo.update(m.id, { phaseId: nextPhase.id })));
 
     } else {
