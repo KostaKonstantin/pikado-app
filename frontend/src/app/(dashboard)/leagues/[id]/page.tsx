@@ -307,8 +307,8 @@ export default function LeagueDetailPage() {
 
   /* ── session actions ─────────────────────────────────────── */
   const openNewSession = () => {
-    // Default: all players present
-    setSessionPresent(new Set(lPlayers.map((lp: any) => lp.playerId)));
+    // Use phase-scoped players for EuroLeague, all players otherwise
+    setSessionPresent(new Set(sessionModalPlayers.map((lp: any) => lp.playerId)));
     setSessionMaxPer(1);
     setSessionDate('');
     setSessionPreview(null);
@@ -709,6 +709,13 @@ export default function LeagueDetailPage() {
   // Mode driven by league.mode: 'session' = flexible evenings; 'round' = full upfront schedule
   const isSessionMode = league?.mode === 'session';
   const isEuroleague  = league?.mode === 'euroleague';
+
+  // When in EuroLeague phase view, limit session player pool to that phase's players
+  const sessionModalPlayers = isEuroleague && activePhaseView
+    ? lPlayers.filter((lp: any) =>
+        (phases.find((p: any) => p.id === activePhaseView)?.playerIds ?? []).includes(lp.playerId)
+      )
+    : lPlayers;
 
   // Computed for sticky mobile action bar
   const activeSessionForBar = sessions.find((s: any) => s.status === 'open');
@@ -2509,15 +2516,15 @@ export default function LeagueDetailPage() {
           {/* Player selection */}
           <div className="mb-4">
             <div className="flex items-center justify-between mb-2">
-              <label className="text-xs text-slate-400">Prisutni igrači ({sessionPresent.size}/{lPlayers.length})</label>
+              <label className="text-xs text-slate-400">Prisutni igrači ({sessionPresent.size}/{sessionModalPlayers.length})</label>
               <div className="flex gap-2">
-                <button onClick={() => { setSessionPresent(new Set(lPlayers.map((lp: any) => lp.playerId))); setSessionPreview(null); }} className="text-xs text-slate-400 hover:text-white">Svi</button>
+                <button onClick={() => { setSessionPresent(new Set(sessionModalPlayers.map((lp: any) => lp.playerId))); setSessionPreview(null); }} className="text-xs text-slate-400 hover:text-white">Svi</button>
                 <span className="text-slate-700">·</span>
                 <button onClick={() => { setSessionPresent(new Set()); setSessionPreview(null); }} className="text-xs text-slate-400 hover:text-white">Nijedan</button>
               </div>
             </div>
             <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
-              {lPlayers.map((lp: any) => {
+              {sessionModalPlayers.map((lp: any) => {
                 const present = sessionPresent.has(lp.playerId);
                 return (
                   <label
