@@ -6,6 +6,7 @@ import { LeaguePlayer } from './entities/league-player.entity';
 import { LeagueMatch } from './entities/league-match.entity';
 import { LeagueSubstitution } from './entities/league-substitution.entity';
 import { LeagueSession } from './entities/league-session.entity';
+import { CompetitionPhase } from './entities/competition-phase.entity';
 import { FixtureService, rrStats } from './fixture.service';
 import { MatchStatus, LeagueStatus, LeagueFormat } from '../common/enums';
 
@@ -30,6 +31,7 @@ export class LeaguesService {
     @InjectRepository(LeagueMatch) private lmRepo: Repository<LeagueMatch>,
     @InjectRepository(LeagueSubstitution) private subRepo: Repository<LeagueSubstitution>,
     @InjectRepository(LeagueSession) private sessionRepo: Repository<LeagueSession>,
+    @InjectRepository(CompetitionPhase) private phaseRepo: Repository<CompetitionPhase>,
     private fixtureService: FixtureService,
   ) {}
 
@@ -116,26 +118,38 @@ export class LeaguesService {
   // Returns all schedule metrics derived purely from player count and format.
   // Zero hardcoded values — formulas documented in fixture.service.ts.
   // ───────────────────────────────────────────────────────────────────────────
-  async getScheduleStats(clubId: string, leagueId: string) {
+  async getScheduleStats(clubId: string, leagueId: string, phaseId?: string) {
     const league = await this.findOne(clubId, leagueId);
-    const players = await this.lpRepo.find({ where: { leagueId } });
-    const n = players.length;
-    const homeAway = league.format === LeagueFormat.HOME_AWAY;
+
+    let n: number;
+    let homeAway: boolean;
+    let matchWhere: any;
+
+    if (phaseId) {
+      // Phase-scoped stats for EuroLeague
+      const phase = await this.phaseRepo.findOne({ where: { id: phaseId, leagueId } });
+      n = phase?.playerIds?.length ?? 0;
+      homeAway = true; // all EuroLeague phases are double round-robin
+      matchWhere = { leagueId, phaseId };
+    } else {
+      const players = await this.lpRepo.find({ where: { leagueId } });
+      n = players.length;
+      homeAway = league.format === LeagueFormat.HOME_AWAY;
+      matchWhere = { leagueId };
+    }
 
     const { rounds, matchesPerRound, totalMatches, hasOddPlayers } = rrStats(n, homeAway);
 
-    const generatedCount = await this.lmRepo.count({ where: { leagueId } });
-    const completedCount = await this.lmRepo.count({ where: { leagueId, status: MatchStatus.COMPLETED } });
+    const generatedCount = await this.lmRepo.count({ where: matchWhere });
+    const completedCount = await this.lmRepo.count({ where: { ...matchWhere, status: MatchStatus.COMPLETED } });
 
     return {
       playerCount: n,
       isDoubleRoundRobin: homeAway,
       hasOddPlayers,
-      // Expected totals (from formula, not from DB)
       expectedRounds: rounds,
       matchesPerRound,
       expectedTotalMatches: totalMatches,
-      // Actual DB state
       generatedMatches: generatedCount,
       completedMatches: completedCount,
       isGenerated: generatedCount > 0,

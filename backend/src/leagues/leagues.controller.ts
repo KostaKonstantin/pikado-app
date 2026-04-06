@@ -35,8 +35,12 @@ export class LeaguesController {
   }
 
   @Get(':id/stats')
-  getScheduleStats(@Param('clubId') clubId: string, @Param('id') id: string) {
-    return this.leaguesService.getScheduleStats(clubId, id);
+  getScheduleStats(
+    @Param('clubId') clubId: string,
+    @Param('id') id: string,
+    @Query('phaseId') phaseId?: string,
+  ) {
+    return this.leaguesService.getScheduleStats(clubId, id, phaseId);
   }
 
   @Get(':id/fixtures')
