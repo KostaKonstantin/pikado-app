@@ -212,6 +212,7 @@ export default function LeagueDetailPage() {
   const [creatingSession, setCreatingSession] = useState(false);
   const [closingSession, setClosingSession]   = useState<string | null>(null);
   const [deletingSession, setDeletingSession] = useState<string | null>(null);
+  const [deleteSessionConfirm, setDeleteSessionConfirm] = useState<string | null>(null);
   const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
 
   // Mobile bottom action bar
@@ -248,7 +249,7 @@ export default function LeagueDetailPage() {
   const [phaseLoading,     setPhaseLoading]     = useState(false);
   const [advancingPhase,         setAdvancingPhase]         = useState(false);
   const [showAdvancePhaseModal,  setShowAdvancePhaseModal]  = useState(false);
-  const [phaseTab,         setPhaseTab]         = useState<'tabela' | 'raspored' | 'bracket' | 'igraci'>('tabela');
+  const [phaseTab,         setPhaseTab]         = useState<'tabela' | 'raspored' | 'bracket' | 'igraci' | 'matrica'>('tabela');
   const [phaseMatchModal,  setPhaseMatchModal]  = useState<any | null>(null);
   const [phaseHomeScore,   setPhaseHomeScore]   = useState(0);
   const [phaseAwayScore,   setPhaseAwayScore]   = useState(0);
@@ -365,9 +366,14 @@ export default function LeagueDetailPage() {
     } finally { setClosingSession(null); }
   };
 
-  const handleDeleteSession = async (sessionId: string) => {
-    if (!club?.id) return;
-    if (!confirm('Obrisati sesiju? Neodigrani mečevi se vraćaju u pool.')) return;
+  const handleDeleteSession = (sessionId: string) => {
+    setDeleteSessionConfirm(sessionId);
+  };
+
+  const confirmDeleteSession = async () => {
+    if (!club?.id || !deleteSessionConfirm) return;
+    const sessionId = deleteSessionConfirm;
+    setDeleteSessionConfirm(null);
     setDeletingSession(sessionId);
     try {
       await leaguesApi.deleteSession(club.id, id, sessionId);
@@ -793,6 +799,7 @@ export default function LeagueDetailPage() {
   if (!league) return null;
 
   return (
+    <>
     <div className="animate-fade-in">
       <Topbar title={league.name} />
 
@@ -3502,7 +3509,7 @@ export default function LeagueDetailPage() {
                 <div>
                   <p className="text-white font-semibold text-base">EvroLiga nije pokrenuta</p>
                   <p className="text-slate-400 text-sm mt-1">
-                    Dodaj igrače u ligi, zatim klikni dugme da pokreneš EvroLigu i generišeš regularni deo.
+                    Igrači su dodati — klikni dugme da pokreneš EvroLigu i generišeš regularni deo.
                   </p>
                 </div>
                 {canEdit && (
@@ -5489,6 +5496,41 @@ export default function LeagueDetailPage() {
       })()}
 
     </div>
+
+    {/* ── Delete session confirm modal ── */}
+    {deleteSessionConfirm && (
+      <div className="fixed inset-0 bg-black/70 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4 animate-fade-in" onClick={() => setDeleteSessionConfirm(null)}>
+        <div className="card w-full sm:max-w-sm p-5 sm:p-6 animate-scale-in" onClick={e => e.stopPropagation()}>
+          {/* Header */}
+          <div className="flex items-start justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-red-500/15 flex items-center justify-center shrink-0">
+                <Trash2 className="w-4 h-4 text-red-400" />
+              </div>
+              <p className="text-white font-semibold text-base">Obrisati ligaški dan?</p>
+            </div>
+            <button onClick={() => setDeleteSessionConfirm(null)} className="p-1.5 rounded-xl hover:bg-slate-700 transition-colors shrink-0" style={{ color: 'var(--text-secondary)' }}>
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          {/* Body */}
+          <p className="text-sm text-slate-400 mb-5 leading-relaxed">
+            Neodigrani mečevi se vraćaju u pool. Odigrani mečevi ostaju sačuvani u istoriji sesije.
+          </p>
+          {/* Actions */}
+          <div className="flex gap-2.5">
+            <button onClick={() => setDeleteSessionConfirm(null)} className="btn-secondary flex-1 justify-center text-sm py-2.5">
+              Otkaži
+            </button>
+            <button onClick={confirmDeleteSession} className="flex-1 justify-center text-sm py-2.5 rounded-xl font-semibold bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/25 hover:border-red-500/40 transition-all">
+              Obriši
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    </>
   );
 }
 
