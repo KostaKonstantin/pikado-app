@@ -57,7 +57,9 @@ export function Sidebar() {
           {/* Club logo / fallback icon — always present, centered when collapsed */}
           {(() => {
             const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3099';
-            const logoSrc = club?.logoUrl ? `${API_URL}${club.logoUrl}` : null;
+            const logoSrc = club?.logoUrl
+              ? club.logoUrl.startsWith('http') ? club.logoUrl : `${API_URL}${club.logoUrl}`
+              : null;
             const initials = club?.name?.slice(0, 2).toUpperCase() || 'PK';
             return (
               <div className={`shrink-0 w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center ${c ? 'mx-auto' : ''}`}>
