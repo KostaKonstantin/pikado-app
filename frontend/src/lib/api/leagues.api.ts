@@ -51,8 +51,8 @@ export const leaguesApi = {
     api.post(`/clubs/${clubId}/leagues/${leagueId}/matches/${matchId}/walkover`, { walkoverId }).then((r) => r.data),
 
   // Dynamic schedule stats — all values derived from N players + format, never hardcoded
-  getStats: (clubId: string, leagueId: string) =>
-    api.get(`/clubs/${clubId}/leagues/${leagueId}/stats`).then((r) => r.data),
+  getStats: (clubId: string, leagueId: string, phaseId?: string) =>
+    api.get(`/clubs/${clubId}/leagues/${leagueId}/stats`, { params: phaseId ? { phaseId } : {} }).then((r) => r.data),
 
   getSubstitutions: (clubId: string, leagueId: string) =>
     api.get(`/clubs/${clubId}/leagues/${leagueId}/substitutions`).then((r) => r.data),

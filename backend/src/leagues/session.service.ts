@@ -23,19 +23,23 @@ export class SessionService {
 
   // ─── Smart pairing algorithm ─────────────────────────────────────────────────
   //
-  // Multi-pass round-by-round scheduler:
+  // Multi-pass round-by-round scheduler with minimum-degree heuristic:
   //
   //   1. Filter candidates — only matches where BOTH players are present
-  //   2. Sort by matchOrder (natural Circle-Method progression: earlier rounds first)
-  //   3. Run maxPerPlayer passes. In each pass every player may receive at most
-  //      ONE match — equivalent to constructing one full round per pass.
-  //      This guarantees maximum utilisation even when the pool contains partial
-  //      rounds left over from previous sessions (a single-pass greedy can
-  //      strand a player at N-1 matches when the pool has incomplete rounds).
+  //   2. Run maxPerPlayer passes. In each pass:
+  //      a. Build the available match pool for this pass (unused, unblocked, under cap)
+  //      b. Compute each player's "degree" — how many available matches they have
+  //      c. Sort by min(degree[home], degree[away]) ASC so the most constrained
+  //         players get paired first, reducing leftover players at end of pass
+  //      d. Greedy selection: schedule match if both players are free this pass
   //
-  // Complexity: O(maxPerPlayer × candidates) — negligible for typical league sizes.
-  // Guarantees: no player > maxPerPlayer matches; same pair never scheduled twice;
-  //             always achieves floor(N × maxPerPlayer / 2) when the pool allows.
+  // This heuristic significantly reduces uneven match counts caused by the naive
+  // matchOrder-first greedy when pool has partial rounds (e.g. 25 players where
+  // one always sits out per round).
+  //
+  // Complexity: O(maxPerPlayer × candidates²) — negligible for typical league sizes.
+  // Guarantees: no player > maxPerPlayer matches; same directional pair never
+  //             scheduled twice; approaches floor(N × maxPerPlayer / 2) matches.
   // ─────────────────────────────────────────────────────────────────────────────
   private selectMatches(
     pool: LeagueMatch[],
@@ -48,19 +52,38 @@ export class SessionService {
       .filter((m) => m.homePlayerId && m.awayPlayerId && presentSet.has(m.homePlayerId) && presentSet.has(m.awayPlayerId))
       .sort((a, b) => a.matchOrder - b.matchOrder);
 
-    const playerCount  = new Map<string, number>();
-    const scheduledPairs = new Set<string>(); // prevents same pair twice in one session
+    const playerCount    = new Map<string, number>();
+    const scheduledPairs = new Set<string>(); // prevents same directional pair twice in one session
     const usedMatchIds   = new Set<string>(); // matches already selected
     const selected: LeagueMatch[] = [];
 
     for (let pass = 0; pass < maxPerPlayer; pass++) {
-      const busyThisPass = new Set<string>(); // each player may play at most once per pass
+      const busyThisPass = new Set<string>();
 
-      for (const match of candidates) {
-        if (usedMatchIds.has(match.id)) continue;
+      // Build available pool for this pass
+      const passPool = candidates.filter((m) => {
+        if (usedMatchIds.has(m.id)) return false;
+        if (scheduledPairs.has(`${m.homePlayerId}|${m.awayPlayerId}`)) return false;
+        const hc = playerCount.get(m.homePlayerId!) ?? 0;
+        const ac = playerCount.get(m.awayPlayerId!) ?? 0;
+        return hc < maxPerPlayer && ac < maxPerPlayer;
+      });
 
-        const pairKey = [match.homePlayerId, match.awayPlayerId].sort().join('|');
-        if (scheduledPairs.has(pairKey)) continue;
+      // Degree = number of available matches each player has this pass
+      const degree = new Map<string, number>();
+      for (const m of passPool) {
+        degree.set(m.homePlayerId!, (degree.get(m.homePlayerId!) ?? 0) + 1);
+        degree.set(m.awayPlayerId!, (degree.get(m.awayPlayerId!) ?? 0) + 1);
+      }
+
+      // Sort: most constrained players first; matchOrder as tiebreaker
+      const sortedPass = [...passPool].sort((a, b) => {
+        const minA = Math.min(degree.get(a.homePlayerId!) ?? 0, degree.get(a.awayPlayerId!) ?? 0);
+        const minB = Math.min(degree.get(b.homePlayerId!) ?? 0, degree.get(b.awayPlayerId!) ?? 0);
+        return minA !== minB ? minA - minB : a.matchOrder - b.matchOrder;
+      });
+
+      for (const match of sortedPass) {
         if (busyThisPass.has(match.homePlayerId!) || busyThisPass.has(match.awayPlayerId!)) continue;
 
         const hc = playerCount.get(match.homePlayerId!) ?? 0;
@@ -70,7 +93,7 @@ export class SessionService {
           usedMatchIds.add(match.id);
           playerCount.set(match.homePlayerId!, hc + 1);
           playerCount.set(match.awayPlayerId!, ac + 1);
-          scheduledPairs.add(pairKey);
+          scheduledPairs.add(`${match.homePlayerId}|${match.awayPlayerId}`);
           busyThisPass.add(match.homePlayerId!);
           busyThisPass.add(match.awayPlayerId!);
         }

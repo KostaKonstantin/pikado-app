@@ -92,7 +92,7 @@ export class EuroleagueService {
     const playerIds = lPlayers.map(lp => lp.playerId);
 
     // Use FixtureService to build + save round-robin matches for this phase
-    const created = await this.fixtureService.generateFixtures(leagueId, playerIds, false, 'round');
+    const created = await this.fixtureService.generateFixtures(leagueId, playerIds, true, 'round');
 
     // Tag all created matches with the phase
     await Promise.all(created.map(m => this.matchRepo.update(m.id, { phaseId: regularPhase.id })));

@@ -575,14 +575,16 @@ export default function LeagueDetailPage() {
     if (!club?.id) return;
     setPhaseLoading(true);
     try {
-      const [fx, st, sess] = await Promise.all([
+      const [fx, st, sess, phaseStats] = await Promise.all([
         leaguesApi.getPhaseFixtures(club.id, id, phaseId),
         leaguesApi.getPhaseStandings(club.id, id, phaseId),
         leaguesApi.getSessions(club.id, id, phaseId),
+        leaguesApi.getStats(club.id, id, phaseId),
       ]);
       setPhaseFixtures(fx);
       setPhaseStandings(st);
       setSessions(sess);
+      setStats(phaseStats);
     } finally { setPhaseLoading(false); }
   };
 
@@ -808,7 +810,6 @@ export default function LeagueDetailPage() {
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <StatPill label="Igrači"  value={stats.playerCount} />
               <StatPill label="Rundi"   value={stats.expectedRounds}       hint={stats.isDoubleRoundRobin ? '2× krug' : '1× krug'} />
-              {!isSessionMode && <StatPill label="Mečeva/dan" value={stats.matchesPerRound} />}
               <StatPill label="Ukupno mečeva" value={stats.expectedTotalMatches} />
               {stats.isGenerated && (
                 <StatPill label="Odigrano"
