@@ -310,6 +310,46 @@ html.dark .badge-draw { background: rgba(148, 163, 184, 0.15); color: #94a3b8; }
 /* ── Touch targets ────────────────────────────────────────────── */
 .touch-target { min-height: 44px; min-width: 44px; }
 
+/* ── Top progress bar ─────────────────────────────────────────── */
+.top-progress-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 9999;
+  pointer-events: none;
+  background: linear-gradient(90deg, #f97316 0%, #fb923c 50%, #f97316 100%);
+  background-size: 200% 100%;
+  box-shadow: 0 0 10px rgba(249, 115, 22, 0.6), 0 0 4px rgba(249, 115, 22, 0.4);
+}
+/* Loading state: animate the bar from 0 → ~88% */
+.top-progress-bar[data-state="loading"] {
+  animation: progress-grow 8s cubic-bezier(0.1, 0.4, 0.6, 1) forwards,
+             progress-shimmer 1.4s ease-in-out infinite;
+}
+/* Completing state: jump to 100% and fade out */
+.top-progress-bar[data-state="completing"] {
+  width: 100% !important;
+  animation: progress-shimmer 0.3s ease-out, progress-fade 0.35s ease-out 0.05s forwards;
+}
+
+@keyframes progress-grow {
+  0%   { width: 0%;   }
+  15%  { width: 35%;  }
+  40%  { width: 60%;  }
+  70%  { width: 78%;  }
+  100% { width: 88%;  }
+}
+@keyframes progress-shimmer {
+  0%   { background-position: 200% center; }
+  100% { background-position: -200% center; }
+}
+@keyframes progress-fade {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
 /* ── Sidebar nav links — theme-aware hover ───────────────────────
    In light mode: 7% dark overlay on white → clearly visible.
    In dark mode:  6% white overlay on dark → subtle highlight.    */
@@ -550,40 +590,107 @@ html.dark .auth-card {
 .stagger-6 { animation-delay: 300ms; }
 
 /* ═══════════════════════════════════════════════════════════════
-   AVATAR SYSTEM V1
+   AVATAR SYSTEM V2 — Premium identity with depth, glow & motion
    ═══════════════════════════════════════════════════════════════ */
 
+/* Rank 1: dramatic gold prestige breathing aura */
+@keyframes leader-glow {
+  0%, 100% {
+    filter:
+      drop-shadow(0 0 6px  rgba(251, 191, 36, 0.70))
+      drop-shadow(0 0 16px rgba(251, 191, 36, 0.40));
+  }
+  50% {
+    filter:
+      drop-shadow(0 0 14px rgba(251, 191, 36, 1.00))
+      drop-shadow(0 0 32px rgba(251, 191, 36, 0.65))
+      drop-shadow(0 0 56px rgba(251, 191, 36, 0.22));
+  }
+}
+
+/* All avatars: subtle idle brightness/saturation pulse — feels alive */
+@keyframes avatar-ambient {
+  0%, 100% { filter: saturate(1.00) brightness(1.00); }
+  50%       { filter: saturate(1.18) brightness(1.07); }
+}
+
+/* Legacy pulse ring (kept for compatibility) */
 @keyframes avatar-pulse {
-  0%   { box-shadow: 0 0 0 0   rgba(255, 255, 255, 0.18); }
+  0%   { box-shadow: 0 0 0 0   rgba(255, 255, 255, 0.15); }
   70%  { box-shadow: 0 0 0 8px rgba(255, 255, 255, 0);    }
   100% { box-shadow: 0 0 0 0   rgba(255, 255, 255, 0);    }
 }
 
-@keyframes leader-glow {
-  0%, 100% { filter: drop-shadow(0 0 8px rgba(255, 215, 0, 0.45)); }
-  50%       { filter: drop-shadow(0 0 18px rgba(255, 215, 0, 0.75)); }
+/* ── Classes ─────────────────────────────────────────────────────── */
+
+/* Rank 2: silver shimmer */
+@keyframes silver-glow {
+  0%, 100% {
+    filter:
+      drop-shadow(0 0 5px  rgba(148, 163, 184, 0.60))
+      drop-shadow(0 0 14px rgba(148, 163, 184, 0.28));
+  }
+  50% {
+    filter:
+      drop-shadow(0 0 12px rgba(203, 213, 225, 0.95))
+      drop-shadow(0 0 28px rgba(148, 163, 184, 0.55))
+      drop-shadow(0 0 50px rgba(148, 163, 184, 0.18));
+  }
+}
+
+/* Rank 3: bronze/copper glow */
+@keyframes bronze-glow {
+  0%, 100% {
+    filter:
+      drop-shadow(0 0 5px  rgba(194,  65,  12, 0.60))
+      drop-shadow(0 0 14px rgba(249, 115,  22, 0.28));
+  }
+  50% {
+    filter:
+      drop-shadow(0 0 12px rgba(249, 115,  22, 0.95))
+      drop-shadow(0 0 28px rgba(194,  65,  12, 0.55))
+      drop-shadow(0 0 50px rgba(194,  65,  12, 0.18));
+  }
 }
 
 .avatar-leader {
-  animation: leader-glow 3s ease-in-out infinite;
+  animation: leader-glow 2.6s ease-in-out infinite;
 }
 
+.avatar-silver {
+  animation: silver-glow 3.0s ease-in-out infinite;
+}
+
+.avatar-bronze {
+  animation: bronze-glow 2.8s ease-in-out infinite;
+}
+
+.avatar-ambient {
+  animation: avatar-ambient 5s ease-in-out infinite;
+}
+
+/* Legacy — kept so existing references don't break */
 .avatar-pulse-ring {
   animation: avatar-pulse 2.4s ease-out infinite;
 }
 
+/* Hover: spring scale + brightness + saturation boost */
 .avatar-hover {
-  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.2s ease;
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.20s ease;
   cursor: default;
 }
 .avatar-hover:hover {
-  transform: scale(1.10);
-  filter: brightness(1.15);
+  transform: scale(1.12);
+  filter: brightness(1.20) saturate(1.30);
 }
 .avatar-hover:hover .avatar-initials {
-  text-shadow: 0 0 14px rgba(255, 255, 255, 0.9), 0 1px 3px rgba(0, 0, 0, 0.4);
+  text-shadow:
+    0 0 18px rgba(255, 255, 255, 1.0),
+    0 0 6px  rgba(255, 255, 255, 0.6),
+    0 1px 4px rgba(0, 0, 0, 0.50) !important;
 }
 
+/* Progress ring: smooth transition + glow via SVG filter (applied inline) */
 .avatar-ring-progress {
   transition: stroke-dashoffset 0.9s cubic-bezier(0.4, 0, 0.2, 1);
 }

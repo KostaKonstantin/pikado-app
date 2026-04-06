@@ -3254,11 +3254,6 @@ export default function LeagueDetailPage() {
                         {standing.points} bod.
                       </span>
                       <span className="text-xs text-slate-500">#{standing.position} pozicija</span>
-                      {rarity !== 'common' && (
-                        <span className={`text-[10px] font-bold tracking-widest uppercase
-                          ${rarity === 'legendary' ? 'text-yellow-400' : rarity === 'epic' ? 'text-violet-400' : 'text-blue-400'}
-                        `}>{rarity}</span>
-                      )}
                     </div>
                   ) : (
                     <p className="text-xs text-slate-600 mt-1">Bez mečeva</p>
