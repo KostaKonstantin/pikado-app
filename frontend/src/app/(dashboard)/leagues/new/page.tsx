@@ -242,7 +242,7 @@ export default function NewLeaguePage() {
                   <span className="text-lg leading-none mt-0.5">🏆</span>
                   <div className="flex-1 min-w-0">
                     <span className="text-sm font-semibold text-white">EvroLiga</span>
-                    <span className="text-xs text-slate-400 mt-0.5 block">Višefazno takmičenje s regularnim delom, barážom, Top 10 i playoffom</span>
+                    <span className="text-xs text-slate-400 mt-0.5 block">Višefazno takmičenje s regularnim delom, barаžom, Top 10 i playoffom</span>
                     {form.mode === 'euroleague' && (
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {['Regularni deo', 'Baraž (9–20)', 'Top 10', 'Playoff'].map((phase, i) => (
