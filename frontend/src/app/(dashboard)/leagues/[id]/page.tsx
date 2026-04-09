@@ -27,7 +27,7 @@ type Tab = 'tabela' | 'raspored' | 'odlozeni' | 'igraci' | 'matrica';
 
 /** Local Avatar shim */
 function Avatar({ name, size = 'sm', winRate, rank }: { name?: string; player?: any; size?: 'sm' | 'md' | 'lg'; winRate?: number; rank?: number }) {
-  return <DartAvatar name={name} size={size === 'lg' ? 'lg' : size === 'md' ? 'md' : 'sm'} winRate={winRate} rank={rank} />;
+  return <DartAvatar name={name} size={size === 'lg' ? 'lg' : size === 'md' ? 'md' : 'sm'} winRate={winRate} rank={rank} animate={rank !== undefined && rank <= 3} />;
 }
 
 function RankBadge({ pos }: { pos: number }) {
@@ -1047,7 +1047,7 @@ export default function LeagueDetailPage() {
                   </div>
 
                   {/* ── FULL TABLE ───────────────────────────────── */}
-                  <div className="card overflow-hidden">
+                  <div className="card" style={{ overflow: 'clip' }}>
                     {/* Desktop table */}
                     <div className="hidden md:block overflow-x-auto">
                       <table className="w-full text-sm">
@@ -1125,7 +1125,7 @@ export default function LeagueDetailPage() {
                         >
                           <div className="flex items-center gap-3">
                             <RankBadge pos={s.position} />
-                            <Avatar name={s.player?.fullName} player={s.player} />
+                            <Avatar name={s.player?.fullName} player={s.player} rank={s.position} />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-1.5">
                                 <span className="font-semibold text-white text-sm truncate">{s.player?.fullName}</span>
@@ -3255,7 +3255,7 @@ export default function LeagueDetailPage() {
             <div className="flex items-start justify-between mb-5">
               <div className="flex items-center gap-3.5">
                 {/* avatar */}
-                <DartAvatar name={name} size="lg" />
+                <DartAvatar name={name} size="lg" animate />
 
                 {/* identity */}
                 <div>
@@ -3710,7 +3710,7 @@ export default function LeagueDetailPage() {
                   </div>
 
                   {/* ── FULL TABLE ── */}
-                  <div className="card overflow-hidden">
+                  <div className="card" style={{ overflow: 'clip' }}>
                     {/* Desktop */}
                     <div className="hidden md:block overflow-x-auto">
                       <table className="w-full text-sm">
@@ -3770,7 +3770,7 @@ export default function LeagueDetailPage() {
                           style={{ backgroundColor: s.position === 1 ? 'rgba(234,179,8,0.03)' : undefined, animationDelay: `${idx * 25}ms` }}>
                           <div className="flex items-center gap-3">
                             <RankBadge pos={s.position} />
-                            <Avatar name={s.player?.fullName} player={s.player} />
+                            <Avatar name={s.player?.fullName} player={s.player} rank={s.position} />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-1.5">
                                 <span className="font-semibold text-white text-sm truncate">{s.player?.fullName}</span>

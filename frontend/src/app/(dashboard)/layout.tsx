@@ -26,7 +26,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <TopProgressBar />
       <Sidebar />
       <main
-        className={`flex-1 min-h-screen w-full min-w-0 transition-all duration-300 ease-in-out ${
+        className={`flex-1 min-h-screen w-full min-w-0 transition-[margin-left] duration-300 ease-in-out ${
           isCollapsed ? 'lg:ml-16' : 'lg:ml-64'
         }`}
       >
