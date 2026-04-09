@@ -41,12 +41,17 @@ export function Sidebar() {
       {/* Sidebar panel */}
       <aside
         className={[
-          'fixed left-0 top-0 h-full flex flex-col z-50',
-          'transition-all duration-300 ease-in-out',
+          'fixed left-0 top-0 flex flex-col z-50',
+          'transition-[width,transform] duration-300 ease-in-out',
           c ? 'w-16' : 'w-64',
           isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
         ].join(' ')}
-        style={{ backgroundColor: 'var(--bg-sidebar)', borderRight: '1px solid var(--border)' }}
+        style={{
+          height: '100dvh',
+          backgroundColor: 'var(--bg-sidebar)',
+          borderRight: '1px solid var(--border)',
+          willChange: 'transform',
+        }}
       >
 
         {/* ── Header ──────────────────────────────────────────── */}

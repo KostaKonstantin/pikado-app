@@ -47,7 +47,7 @@ export default function NewPlayerPage() {
         <Topbar title="Novi Igrač" />
         <div className="min-h-[calc(100vh-56px)] flex items-center justify-center px-4">
           <div className="w-full max-w-sm animate-scale-in flex flex-col items-center text-center gap-6">
-            <DartAvatar name={done.name} size="xl" />
+            <DartAvatar name={done.name} size="xl" animate />
             <div className="space-y-1">
               <div className="flex items-center justify-center gap-2">
                 <CheckCircle2 className="w-5 h-5 text-green-400" />

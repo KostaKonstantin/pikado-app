@@ -277,7 +277,7 @@ export default function PlayerDetailPage() {
         <div className="card p-6 animate-fade-in-up">
           {!editing ? (
             <div className="flex items-center gap-5">
-              <DartAvatar name={player.fullName} size="xl" />
+              <DartAvatar name={player.fullName} size="xl" animate />
               <div className="flex-1 min-w-0">
                 <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{player.fullName}</h2>
                 {player.nickname && (

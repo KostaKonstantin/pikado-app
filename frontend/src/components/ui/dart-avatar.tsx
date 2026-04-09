@@ -154,6 +154,7 @@ export interface DartAvatarProps {
   winRate?: number;
   size?: AvatarSize;
   className?: string;
+  animate?: boolean;
 }
 
 export function DartAvatar({
@@ -163,6 +164,7 @@ export function DartAvatar({
   winRate,
   size = 'md',
   className = '',
+  animate = false,
 }: DartAvatarProps) {
   const px       = SIZE_PX[size];
   const display  = name?.trim() || '?';
@@ -176,14 +178,15 @@ export function DartAvatar({
   /* Font size */
   const fs = Math.round(px * (initials.length === 1 ? 0.42 : 0.36));
 
-  /* Box shadow — 5 layers: depth + gloss + tight ring + ambient + dark base */
+  /* Box shadow — 3 layers base; top 3 get extra ambient glow layers */
   const boxShadow = [
     `inset 0 -${Math.round(px * 0.18)}px ${Math.round(px * 0.38)}px ${variant.innerGlow}`,
-    `inset 0 ${Math.round(px * 0.06)}px ${Math.round(px * 0.14)}px rgba(255,255,255,0.14)`,
-    `0 0 0 1px ${variant.outerAura.replace('0.28', '0.45').replace('0.30', '0.50').replace('0.38', '0.55').replace('0.40', '0.55').replace('0.50', '0.60')}`,
-    `0 0 ${Math.round(px * 0.55)}px ${variant.outerAura}`,
-    `0 0 ${Math.round(px * 1.1)}px ${variant.outerAura.replace('0.28', '0.10').replace('0.30', '0.12').replace('0.38', '0.14').replace('0.40', '0.14').replace('0.50', '0.18')}`,
-    `0 ${Math.round(px * 0.10)}px ${Math.round(px * 0.35)}px rgba(0,0,0,0.55)`,
+    `0 0 0 1px ${variant.outerAura}`,
+    `0 ${Math.round(px * 0.10)}px ${Math.round(px * 0.35)}px rgba(0,0,0,0.40)`,
+    ...(isTop3 ? [
+      `0 0 ${Math.round(px * 0.55)}px ${variant.outerAura}`,
+      `0 0 ${Math.round(px * 1.1)}px ${variant.outerAura}`,
+    ] : []),
   ].join(', ');
 
   /* Badge colors */
@@ -201,20 +204,21 @@ export function DartAvatar({
   const showRing   = winRate !== undefined;
   const dashOffset = showRing ? circ * (1 - (winRate ?? 0) / 100) : circ;
 
-  /* Motion class per rank */
-  const motionClass =
-    rank === 1 ? 'avatar-leader' :
-    rank === 2 ? 'avatar-silver' :
-    rank === 3 ? 'avatar-bronze' :
-                 'avatar-ambient';
+  /* Motion class per rank — only when animate=true */
+  const motionClass = animate
+    ? rank === 1 ? 'avatar-leader'
+    : rank === 2 ? 'avatar-silver'
+    : rank === 3 ? 'avatar-bronze'
+    : 'avatar-ambient'
+    : '';
 
   return (
     <div
       className={`relative inline-flex items-center justify-center shrink-0 select-none avatar-hover ${motionClass} ${className}`}
       style={{ width: px, height: px, flexShrink: 0 }}
     >
-      {/* Top 3: outer prestige pulse ring (gold / silver / bronze) */}
-      {isTop3 && (
+      {/* Top 3: outer prestige pulse ring — only when animate=true */}
+      {animate && isTop3 && (
         <div
           className="absolute inset-0 rounded-full animate-ping pointer-events-none"
           style={{
@@ -251,7 +255,6 @@ export function DartAvatar({
             strokeLinecap="round"
             strokeDasharray={circ}
             strokeDashoffset={dashOffset}
-            style={{ filter: `drop-shadow(0 0 4px ${variant.ringColor}88)` }}
           />
         </svg>
       )}
@@ -264,8 +267,8 @@ export function DartAvatar({
           borderRadius: '50%',
           background: variant.bg,
           boxShadow,
-          backdropFilter: 'blur(2px)',
           overflow: 'hidden',
+          ...(isTop3 && { backdropFilter: 'blur(1px)' }),
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
