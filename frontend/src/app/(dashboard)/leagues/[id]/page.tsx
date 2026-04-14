@@ -291,7 +291,16 @@ export default function LeagueDetailPage() {
   const handleDownloadStandings = async () => {
     setDownloadingStandings(true);
     try {
-      await generateStandingsPDF({ leagueName: league.name, standings, stats });
+      if (activePhaseView) {
+        const phaseName = phases.find((p: any) => p.id === activePhaseView)?.name ?? '';
+        await generateStandingsPDF({
+          leagueName: phaseName ? `${league.name} – ${phaseName}` : league.name,
+          standings: phaseStandings,
+          stats,
+        });
+      } else {
+        await generateStandingsPDF({ leagueName: league.name, standings, stats });
+      }
     } finally {
       setDownloadingStandings(false);
     }
