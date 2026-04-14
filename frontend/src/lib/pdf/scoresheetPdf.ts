@@ -137,7 +137,7 @@ export async function generateScoresheetPDF({
       startY: y,
       head: [['#', 'Domaćin', 'Rezultat', 'Gost']],
       body: rows,
-      margin: { left: M, right: M },
+      margin: { left: M, right: M, bottom: 20 },
       tableWidth: CW,
 
       styles: {
@@ -187,7 +187,15 @@ export async function generateScoresheetPDF({
 
   // ── 5. Summary footer box ────────────────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tableEndY: number = matches.length > 0 ? (doc as any).lastAutoTable.finalY + 6 : y + 20;
+  let tableEndY: number = matches.length > 0 ? (doc as any).lastAutoTable.finalY + 6 : y + 20;
+
+  // Need ~60 mm for summary box + instructions + gap above the 14 mm footer zone.
+  // margin.bottom=20 on autoTable ensures finalY ≤ PH-20, so tableEndY ≤ PH-14,
+  // which almost always triggers this branch for multi-page tables — that's intentional.
+  if (tableEndY + 60 > PH - 14) {
+    doc.addPage();
+    tableEndY = 20;
+  }
 
   doc.setFillColor(...C.slate50);
   doc.setDrawColor(...C.orange);
@@ -221,19 +229,22 @@ export async function generateScoresheetPDF({
   iy += 4.5;
   doc.text('· U slučaju nedolaska — označiti WO pored rezultata', M, iy);
 
-  // ── 7. Page footer ───────────────────────────────────────────────────────────
-  doc.setDrawColor(...C.slate200);
-  doc.setLineWidth(0.25);
-  doc.line(M, PH - 14, PW - M, PH - 14);
-
-  doc.setFont('Arial', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(...C.slate500);
-  doc.text('Pikado App', M, PH - 8);
-  doc.text(
-    new Date().toLocaleString('sr-RS', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
-    PW - M, PH - 8, { align: 'right' },
-  );
+  // ── 7. Page footer — drawn on every page ────────────────────────────────────
+  const totalPages = doc.getNumberOfPages();
+  const footerTimestamp = new Date().toLocaleString('sr-RS', {
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+    doc.setDrawColor(...C.slate200);
+    doc.setLineWidth(0.25);
+    doc.line(M, PH - 14, PW - M, PH - 14);
+    doc.setFont('Arial', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(...C.slate500);
+    doc.text('Pikado App', M, PH - 8);
+    doc.text(footerTimestamp, PW - M, PH - 8, { align: 'right' });
+  }
 
   // ── 8. Save ──────────────────────────────────────────────────────────────────
   const safeName = leagueName.replace(/[^a-zA-Z0-9\-_ ćčšžđČĆŠŽĐ]/g, '').trim().replace(/\s+/g, '_').slice(0, 30);
