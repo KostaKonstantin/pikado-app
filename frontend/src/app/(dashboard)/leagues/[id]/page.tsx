@@ -293,9 +293,16 @@ export default function LeagueDetailPage() {
     try {
       if (activePhaseView) {
         const phaseName = phases.find((p: any) => p.id === activePhaseView)?.name ?? '';
+        // Phase standings use wins/draws/losses; PDF interface expects won/drawn/lost
+        const normalised = phaseStandings.map((s: any) => ({
+          ...s,
+          won:   s.won   ?? s.wins   ?? 0,
+          drawn: s.drawn ?? s.draws  ?? 0,
+          lost:  s.lost  ?? s.losses ?? 0,
+        }));
         await generateStandingsPDF({
           leagueName: phaseName ? `${league.name} – ${phaseName}` : league.name,
-          standings: phaseStandings,
+          standings: normalised,
           stats,
         });
       } else {
