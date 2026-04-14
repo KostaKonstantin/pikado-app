@@ -4306,6 +4306,8 @@ export default function LeagueDetailPage() {
             {!phaseLoading && !isPlayoff && phaseTab === 'matrica' && (() => {
               /* Players sorted by phase standings position */
               const sortedPlayers = phaseStandings.map((s: any) => ({ playerId: s.playerId, player: s.player }));
+              // All non-playoff phases use home/away double round-robin → 2 matches per pair
+              const expectedPerPair = 2;
 
               const getCellData = (aId: string, bId: string) => {
                 if (aId === bId) return null;
@@ -4316,10 +4318,10 @@ export default function LeagueDetailPage() {
                 );
                 const completed = between.filter((m: any) => m.status === 'completed' || m.status === 'walkover');
                 let status: 'not_played' | 'partial' | 'completed' | 'upcoming';
-                if (between.length === 0)        status = 'not_played';
-                else if (completed.length === 0) status = 'upcoming';
-                else if (completed.length >= 1)  status = 'completed';
-                else                             status = 'partial';
+                if (between.length === 0)                          status = 'not_played';
+                else if (completed.length === 0)                   status = 'upcoming';
+                else if (completed.length >= expectedPerPair)      status = 'completed';
+                else                                               status = 'partial';
                 return { between, completed, status };
               };
 
@@ -4362,7 +4364,7 @@ export default function LeagueDetailPage() {
                 let bg = '', border = '', label = '';
                 if (cell.status === 'not_played')      { bg = 'rgba(15,23,42,0.7)';       border = '1px dashed rgba(71,85,105,0.55)'; label = ''; }
                 else if (cell.status === 'upcoming')   { bg = 'rgba(99,102,241,0.12)';    border = '1px solid rgba(99,102,241,0.28)'; label = '⏳'; }
-                else if (cell.status === 'partial')    { bg = 'rgba(245,158,11,0.14)';    border = '1px solid rgba(245,158,11,0.32)'; label = '½'; }
+                else if (cell.status === 'partial')    { bg = 'rgba(245,158,11,0.14)';    border = '1px solid rgba(245,158,11,0.32)'; label = `${cell.completed.length}/${expectedPerPair}`; }
                 else                                   { bg = 'rgba(34,197,94,0.14)';     border = '1px solid rgba(34,197,94,0.3)';  label = '✓'; }
                 const aName = sortedPlayers.find((p: any) => p.playerId === aId)?.player?.fullName || '';
                 const bName = sortedPlayers.find((p: any) => p.playerId === bId)?.player?.fullName || '';
@@ -4395,9 +4397,9 @@ export default function LeagueDetailPage() {
                   cell.status === 'upcoming'  ? { bg: 'rgba(99,102,241,0.09)', border: 'rgba(99,102,241,0.22)', text: '#818cf8' } :
                                                 { bg: 'rgba(51,65,85,0.35)',   border: 'rgba(71,85,105,0.4)',   text: '#94a3b8' };
                 const statusLabel =
-                  cell.status === 'completed' ? '✓ Završeno' :
-                  cell.status === 'upcoming'  ? 'Na čekanju' :
-                  cell.status === 'partial'   ? 'Delimično' : 'Nije odigrano';
+                  cell.status === 'completed' ? `✓ Završeno · ${cell.completed.length}/${expectedPerPair}` :
+                  cell.status === 'partial'   ? `${cell.completed.length} / ${expectedPerPair} odigrano` :
+                  cell.status === 'upcoming'  ? 'Na čekanju' : 'Nije odigrano';
                 const MatchRow = ({ m }: { m: any }) => {
                   const done = m.status === 'completed' || m.status === 'walkover';
                   const aIsHome = m.homePlayerId === aId;
