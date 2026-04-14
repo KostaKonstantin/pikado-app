@@ -187,7 +187,13 @@ export async function generateScoresheetPDF({
 
   // ── 5. Summary footer box ────────────────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tableEndY: number = matches.length > 0 ? (doc as any).lastAutoTable.finalY + 6 : y + 20;
+  let tableEndY: number = matches.length > 0 ? (doc as any).lastAutoTable.finalY + 6 : y + 20;
+
+  // If summary + instructions block won't fit before the footer, move to a new page
+  if (tableEndY > PH - 55) {
+    doc.addPage();
+    tableEndY = 20;
+  }
 
   doc.setFillColor(...C.slate50);
   doc.setDrawColor(...C.orange);
