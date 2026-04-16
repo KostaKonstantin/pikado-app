@@ -71,7 +71,7 @@ export const leaguesApi = {
   previewSession: (clubId: string, leagueId: string, data: { presentPlayerIds: string[]; maxMatchesPerPlayer?: number }) =>
     api.post(`/clubs/${clubId}/leagues/${leagueId}/sessions/preview`, data).then((r) => r.data),
 
-  createSession: (clubId: string, leagueId: string, data: { presentPlayerIds: string[]; maxMatchesPerPlayer?: number; sessionDate?: string | null }) =>
+  createSession: (clubId: string, leagueId: string, data: { presentPlayerIds: string[]; maxMatchesPerPlayer?: number; sessionDate?: string | null; manualMode?: boolean }) =>
     api.post(`/clubs/${clubId}/leagues/${leagueId}/sessions`, data).then((r) => r.data),
 
   closeSession: (clubId: string, leagueId: string, sessionId: string) =>
