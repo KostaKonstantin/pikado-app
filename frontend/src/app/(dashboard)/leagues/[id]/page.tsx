@@ -210,6 +210,7 @@ export default function LeagueDetailPage() {
   const [sessionPreview, setSessionPreview]   = useState<any>(null);
   const [previewLoading, setPreviewLoading]   = useState(false);
   const [creatingSession, setCreatingSession] = useState(false);
+  const [sessionManualMode, setSessionManualMode] = useState(false);
   const [closingSession, setClosingSession]   = useState<string | null>(null);
   const [deletingSession, setDeletingSession] = useState<string | null>(null);
   const [deleteSessionConfirm, setDeleteSessionConfirm] = useState<string | null>(null);
@@ -329,6 +330,7 @@ export default function LeagueDetailPage() {
     setSessionMaxPer(1);
     setSessionDate('');
     setSessionPreview(null);
+    setSessionManualMode(false);
     setNewSessionOpen(true);
   };
 
@@ -354,19 +356,23 @@ export default function LeagueDetailPage() {
   };
 
   const handleCreateSession = async () => {
-    if (!club?.id || sessionPresent.size < 2) return;
+    if (!club?.id) return;
+    if (!sessionManualMode && sessionPresent.size < 2) return;
     setCreatingSession(true);
     try {
-      const newSession = await leaguesApi.createSession(club.id, id, {
-        presentPlayerIds: [...sessionPresent],
-        maxMatchesPerPlayer: sessionMaxPer,
-        sessionDate: sessionDate || null,
-      });
+      const newSession = await leaguesApi.createSession(club.id, id, sessionManualMode
+        ? { presentPlayerIds: [], sessionDate: sessionDate || null, manualMode: true }
+        : { presentPlayerIds: [...sessionPresent], maxMatchesPerPlayer: sessionMaxPer, sessionDate: sessionDate || null }
+      );
       setNewSessionOpen(false);
       setSessionPreview(null);
       setExpandedSessions((prev) => new Set([...prev, newSession.id]));
       await load();
       if (activePhaseView) await loadPhaseData(activePhaseView);
+      // In manual mode, immediately open the build-mode dialog for the new session
+      if (sessionManualMode) {
+        openManualMatch(newSession, true);
+      }
     } catch (e: any) {
       alert(e?.response?.data?.message ?? 'Greška pri kreiranju sesije');
     } finally { setCreatingSession(false); }
@@ -469,12 +475,17 @@ export default function LeagueDetailPage() {
   const [manualCheck, setManualCheck] = useState<any>(null);
   const [manualChecking, setManualChecking] = useState(false);
   const [manualSaving, setManualSaving] = useState(false);
+  // Build mode: adding multiple matches in sequence (whole session manual entry)
+  const [manualBuildMode, setManualBuildMode] = useState(false);
+  const [manualAddedMatches, setManualAddedMatches] = useState<any[]>([]);
 
-  const openManualMatch = (session: any) => {
+  const openManualMatch = (session: any, buildMode = false) => {
     setManualMatchSession(session);
     setManualHome('');
     setManualAway('');
     setManualCheck(null);
+    setManualBuildMode(buildMode);
+    setManualAddedMatches([]);
   };
 
   const closeManualMatch = () => {
@@ -482,6 +493,8 @@ export default function LeagueDetailPage() {
     setManualHome('');
     setManualAway('');
     setManualCheck(null);
+    setManualBuildMode(false);
+    setManualAddedMatches([]);
   };
 
   // Run check whenever either player changes.
@@ -513,9 +526,18 @@ export default function LeagueDetailPage() {
     if (manualCheck?.status === 'blocked') return;
     setManualSaving(true);
     try {
-      await leaguesApi.addManualMatch(club.id, id, manualMatchSession.id, manualHome, manualAway);
-      closeManualMatch();
-      await load();
+      const added = await leaguesApi.addManualMatch(club.id, id, manualMatchSession.id, manualHome, manualAway);
+      if (manualBuildMode) {
+        // Stay in modal — reset pickers, append to running list
+        setManualAddedMatches((prev) => [...prev, added]);
+        setManualHome('');
+        setManualAway('');
+        setManualCheck(null);
+        load(); // refresh page data in background (no await)
+      } else {
+        closeManualMatch();
+        await load();
+      }
     } catch (e: any) {
       alert(e?.response?.data?.message ?? 'Greška pri dodavanju meča');
     } finally { setManualSaving(false); }
@@ -2311,20 +2333,24 @@ export default function LeagueDetailPage() {
       {/* ══ MODAL: Ručno dodavanje meča ══════════════════════════ */}
       {manualMatchSession && (
         <Modal onClose={closeManualMatch}>
-          {/* ── Header (never scrolls) ── */}
+          {/* ── Header ── */}
           <div className="flex items-center justify-between mb-4 shrink-0">
             <h3 className="font-semibold text-white flex items-center gap-2 text-sm">
               <Plus className="w-4 h-4 text-orange-400" />
-              Dodaj Meč — Ligaški Dan {manualMatchSession.sessionNumber}
+              {manualBuildMode
+                ? <>Ligaški Dan {manualMatchSession.sessionNumber} — Manuelni unos</>
+                : <>Dodaj Meč — Ligaški Dan {manualMatchSession.sessionNumber}</>
+              }
             </h3>
             <button onClick={closeManualMatch} className="p-1 text-slate-400 hover:text-white rounded-lg transition-colors">
               <X className="w-5 h-5" />
             </button>
           </div>
 
-          {/* ── Scrollable body (player selectors + validation) ── */}
-          <div className="space-y-4 overflow-y-auto overscroll-contain" style={{ maxHeight: 'min(55vh, 420px)' }}>
-            {/* Home player */}
+          {/* ── Scrollable body ── */}
+          <div className="space-y-4 overflow-y-auto overscroll-contain" style={{ maxHeight: 'min(60vh, 500px)' }}>
+
+            {/* Player selectors */}
             <div>
               <label className="text-xs text-slate-400 mb-1.5 block font-medium">Domaćin</label>
               <PlayerCombobox
@@ -2336,7 +2362,6 @@ export default function LeagueDetailPage() {
               />
             </div>
 
-            {/* Swap indicator */}
             <div className="flex items-center justify-center">
               <div className="flex items-center gap-2 text-slate-600 text-xs">
                 <div className="h-px w-12 bg-slate-700" />
@@ -2345,7 +2370,6 @@ export default function LeagueDetailPage() {
               </div>
             </div>
 
-            {/* Away player */}
             <div>
               <label className="text-xs text-slate-400 mb-1.5 block font-medium">Gost</label>
               <PlayerCombobox
@@ -2389,14 +2413,23 @@ export default function LeagueDetailPage() {
                       <p className="text-xs text-red-400/70 mt-0.5">{manualCheck.message}</p>
                     </>
                   )}
-                  {!manualChecking && manualCheck?.status === 'second' && (
-                    <>
-                      <p className="font-semibold text-amber-400">Validan meč — drugi (poslednji) susret</p>
-                      <p className="text-xs text-amber-400/70 mt-0.5">
-                        Nakon ovog meča {manualCheck.isFromPool ? '(iz pool-a)' : ''}, ovi igrači više neće moći igrati jedan protiv drugog.
-                      </p>
-                    </>
-                  )}
+                  {!manualChecking && manualCheck?.status === 'second' && (() => {
+                    const actualHome = lPlayers.find((lp: any) => lp.playerId === manualCheck.actualHomeId)?.player?.fullName;
+                    const actualAway = lPlayers.find((lp: any) => lp.playerId === manualCheck.actualAwayId)?.player?.fullName;
+                    return (
+                      <>
+                        <p className="font-semibold text-amber-400">Validan meč — drugi (poslednji) susret</p>
+                        {manualCheck.willReverse && actualHome && actualAway && (
+                          <p className="text-xs text-amber-400 mt-1 font-medium">
+                            ↔ Smer je automatski preokrenut: <span className="text-white">{actualHome}</span> (dom.) vs <span className="text-white">{actualAway}</span> (gost)
+                          </p>
+                        )}
+                        <p className="text-xs text-amber-400/70 mt-0.5">
+                          Nakon ovog meča {manualCheck.isFromPool ? '(iz pool-a)' : ''}, ovi igrači više neće moći igrati jedan protiv drugog.
+                        </p>
+                      </>
+                    );
+                  })()}
                   {!manualChecking && manualCheck?.status === 'first' && (
                     <>
                       <p className="font-semibold text-green-400">Validan meč — prvi susret</p>
@@ -2409,16 +2442,46 @@ export default function LeagueDetailPage() {
               </div>
             )}
 
+            {/* Build mode: running list of added matches */}
+            {manualBuildMode && manualAddedMatches.length > 0 && (
+              <div className="rounded-xl border border-slate-700 overflow-hidden">
+                <div className="px-3 py-2 bg-slate-800/60 border-b border-slate-700">
+                  <p className="text-xs text-slate-400 font-medium">
+                    Uneti mečevi — <span className="text-white font-semibold">{manualAddedMatches.length}</span>
+                  </p>
+                </div>
+                <div className="divide-y divide-slate-700/50 max-h-48 overflow-y-auto">
+                  {manualAddedMatches.map((m, i) => (
+                    <div key={m?.id ?? i} className="flex items-center gap-2 px-3 py-2 text-xs">
+                      <span className="text-slate-600 tabular-nums w-5 shrink-0">{i + 1}.</span>
+                      <span className="text-slate-200 flex-1 truncate">{m?.homePlayer?.fullName ?? '—'}</span>
+                      <span className="text-slate-600 shrink-0">vs</span>
+                      <span className="text-slate-200 flex-1 truncate text-right">{m?.awayPlayer?.fullName ?? '—'}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
           </div>
 
-          {/* ── Footer (always visible — never scrolls) ── */}
+          {/* ── Footer ── */}
           <div className="flex gap-3 pt-4 mt-1 border-t border-slate-700/40 shrink-0">
-            <button
-              onClick={closeManualMatch}
-              className="flex-1 px-4 py-2.5 rounded-xl border border-slate-700 text-slate-400 hover:text-white text-sm font-medium transition-colors"
-            >
-              Otkaži
-            </button>
+            {manualBuildMode ? (
+              <button
+                onClick={async () => { closeManualMatch(); await load(); }}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-700 text-slate-300 hover:text-white text-sm font-medium transition-colors"
+              >
+                Završi ({manualAddedMatches.length} meč{manualAddedMatches.length !== 1 ? 'a' : ''})
+              </button>
+            ) : (
+              <button
+                onClick={closeManualMatch}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-700 text-slate-400 hover:text-white text-sm font-medium transition-colors"
+              >
+                Otkaži
+              </button>
+            )}
             <button
               onClick={handleAddManualMatch}
               disabled={
@@ -2496,6 +2559,26 @@ export default function LeagueDetailPage() {
             <button onClick={() => { setNewSessionOpen(false); setSessionPreview(null); }} className="p-1 text-slate-400 hover:text-white rounded-lg transition-colors"><X className="w-5 h-5" /></button>
           </div>
 
+          {/* Mode toggle */}
+          <div className="flex gap-1 mb-4 p-1 bg-slate-800/80 rounded-xl border border-slate-700">
+            <button
+              onClick={() => { setSessionManualMode(false); setSessionPreview(null); }}
+              className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
+                !sessionManualMode ? 'bg-orange-500 text-white shadow' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Auto
+            </button>
+            <button
+              onClick={() => { setSessionManualMode(true); setSessionPreview(null); }}
+              className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
+                sessionManualMode ? 'bg-orange-500 text-white shadow' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Manuelno
+            </button>
+          </div>
+
           {/* Date */}
           <div className="mb-4">
             <label className="text-xs text-slate-400 mb-1.5 block">Datum ligaškog dana (opciono)</label>
@@ -2507,159 +2590,173 @@ export default function LeagueDetailPage() {
             />
           </div>
 
-          {/* Max per player */}
-          <div className="mb-4">
-            <label className="text-xs text-slate-400 mb-2 block">Maks. mečeva po igraču</label>
-            <div className="flex gap-2">
-              {[1, 2, 3, 4, 5, 6].map((n) => (
-                <button
-                  key={n}
-                  onClick={() => { setSessionMaxPer(n); setSessionPreview(null); }}
-                  className={`flex-1 py-2 rounded-lg text-sm font-semibold border-2 transition-all ${
-                    sessionMaxPer === n
-                      ? 'border-orange-500 bg-orange-500/15 text-orange-400'
-                      : 'border-slate-700 text-slate-400 hover:border-slate-600'
-                  }`}
-                >{n}</button>
-              ))}
-              <input
-                type="number"
-                min={1}
-                max={99}
-                value={![1,2,3,4,5,6].includes(sessionMaxPer) ? sessionMaxPer : ''}
-                placeholder="..."
-                onChange={(e) => {
-                  const v = parseInt(e.target.value);
-                  if (v >= 1) { setSessionMaxPer(v); setSessionPreview(null); }
-                }}
-                className="w-14 py-2 px-2 rounded-lg text-sm font-semibold border-2 border-slate-700 bg-slate-800 text-slate-300 text-center focus:border-orange-500 focus:outline-none"
-              />
-            </div>
-          </div>
-
-          {/* Player selection */}
-          <div className="mb-4">
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs text-slate-400">Prisutni igrači ({sessionPresent.size}/{sessionModalPlayers.length})</label>
-              <div className="flex gap-2">
-                <button onClick={() => { setSessionPresent(new Set(sessionModalPlayers.map((lp: any) => lp.playerId))); setSessionPreview(null); }} className="text-xs text-slate-400 hover:text-white">Svi</button>
-                <span className="text-slate-700">·</span>
-                <button onClick={() => { setSessionPresent(new Set()); setSessionPreview(null); }} className="text-xs text-slate-400 hover:text-white">Nijedan</button>
-              </div>
-            </div>
-            <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
-              {sessionModalPlayers.map((lp: any) => {
-                const present = sessionPresent.has(lp.playerId);
-                return (
-                  <label
-                    key={lp.playerId}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-all ${
-                      present ? 'border-orange-500/50 bg-orange-500/8' : 'border-slate-700 hover:border-slate-600'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={present}
-                      onChange={() => togglePresent(lp.playerId)}
-                      className="sr-only"
-                    />
-                    <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
-                      present ? 'border-orange-500 bg-orange-500' : 'border-slate-600'
-                    }`}>
-                      {present && <CheckCircle2 className="w-3 h-3 text-white" />}
-                    </div>
-                    <Avatar name={lp.player?.fullName} player={lp.player} size="sm" />
-                    <span className="text-sm text-white font-medium flex-1">{lp.player?.fullName}</span>
-                  </label>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Live match count calculation */}
-          {sessionPresent.size >= 2 && (() => {
-            const N = sessionPresent.size;
-            const M = sessionMaxPer;
-            const estimate = (N * M) / 2;
-            const isValid = (N * M) % 2 === 0;
-            // Use real backend count when preview has been fetched, otherwise show estimate
-            const realCount = sessionPreview?.matchCount;
-            const displayCount = realCount ?? estimate;
-            const isEstimate = realCount === undefined;
-            return (
-              <div className={`mb-4 px-3.5 py-3 rounded-xl border transition-all ${
-                isValid
-                  ? 'bg-orange-500/8 border-orange-500/25'
-                  : 'bg-red-500/8 border-red-500/25'
-              }`}>
-                {isValid ? (
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-white">
-                        {isEstimate ? '~' : ''}{displayCount} meč{displayCount !== 1 ? 'a' : ''} večeras
-                      </p>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        {N} igrač{N !== 1 ? 'a' : ''} · svako igra {M} meč{M !== 1 ? 'a' : ''}
-                        {isEstimate && <span className="ml-1 opacity-60">(procena)</span>}
-                      </p>
-                    </div>
-                    <div className="text-2xl font-bold text-orange-400 tabular-nums shrink-0">
-                      {isEstimate ? '~' : ''}{displayCount}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-6 h-6 rounded-full bg-red-500/20 flex items-center justify-center shrink-0">
-                      <span className="text-red-400 text-xs font-bold">!</span>
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-red-400">Neparni raspored</p>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        {N} × {M} = {N * M} nije deljivo sa 2 — nije moguće ravnomerno rasporediti
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* Preview */}
-          <button
-            onClick={loadPreview}
-            disabled={sessionPresent.size < 2 || previewLoading}
-            className="w-full py-2 rounded-lg border border-slate-700 text-slate-300 hover:border-slate-600 text-sm font-medium transition-colors mb-3 disabled:opacity-40"
-          >
-            {previewLoading
-              ? <><span className="animate-spin inline-block w-3 h-3 border-2 border-slate-400/30 border-t-slate-300 rounded-full mr-2" />Računam...</>
-              : 'Prikaži pregled mečeva'
-            }
-          </button>
-
-          {sessionPreview && (
-            <div className="mb-4 p-3 bg-slate-800/60 rounded-xl border border-slate-700">
-              <p className="text-xs text-slate-400 mb-2">
-                <span className="text-white font-semibold">{sessionPreview.matchCount}</span> mečeva biće generisano
-                &nbsp;·&nbsp;{sessionPreview.presentCount} prisutnih igrača
-                &nbsp;·&nbsp;Pool: {sessionPreview.poolSize} preostalo
-              </p>
-              {sessionPreview.matches?.slice(0, 5).map((m: any, i: number) => (
-                <div key={m?.id ?? i} className="flex items-center justify-between text-xs py-1 border-t border-slate-700/50">
-                  <span className="text-slate-300">{m?.homePlayer?.fullName}</span>
-                  <span className="text-slate-600 px-2">vs</span>
-                  <span className="text-slate-300">{m?.awayPlayer?.fullName}</span>
+          {/* ── Auto mode only ── */}
+          {!sessionManualMode && (
+            <>
+              {/* Max per player */}
+              <div className="mb-4">
+                <label className="text-xs text-slate-400 mb-2 block">Maks. mečeva po igraču</label>
+                <div className="flex gap-2">
+                  {[1, 2, 3, 4, 5, 6].map((n) => (
+                    <button
+                      key={n}
+                      onClick={() => { setSessionMaxPer(n); setSessionPreview(null); }}
+                      className={`flex-1 py-2 rounded-lg text-sm font-semibold border-2 transition-all ${
+                        sessionMaxPer === n
+                          ? 'border-orange-500 bg-orange-500/15 text-orange-400'
+                          : 'border-slate-700 text-slate-400 hover:border-slate-600'
+                      }`}
+                    >{n}</button>
+                  ))}
+                  <input
+                    type="number"
+                    min={1}
+                    max={99}
+                    value={![1,2,3,4,5,6].includes(sessionMaxPer) ? sessionMaxPer : ''}
+                    placeholder="..."
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value);
+                      if (v >= 1) { setSessionMaxPer(v); setSessionPreview(null); }
+                    }}
+                    className="w-14 py-2 px-2 rounded-lg text-sm font-semibold border-2 border-slate-700 bg-slate-800 text-slate-300 text-center focus:border-orange-500 focus:outline-none"
+                  />
                 </div>
-              ))}
-              {sessionPreview.matchCount > 5 && (
-                <p className="text-xs text-slate-500 text-center mt-1">+{sessionPreview.matchCount - 5} još</p>
+              </div>
+
+              {/* Player selection */}
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs text-slate-400">Prisutni igrači ({sessionPresent.size}/{sessionModalPlayers.length})</label>
+                  <div className="flex gap-2">
+                    <button onClick={() => { setSessionPresent(new Set(sessionModalPlayers.map((lp: any) => lp.playerId))); setSessionPreview(null); }} className="text-xs text-slate-400 hover:text-white">Svi</button>
+                    <span className="text-slate-700">·</span>
+                    <button onClick={() => { setSessionPresent(new Set()); setSessionPreview(null); }} className="text-xs text-slate-400 hover:text-white">Nijedan</button>
+                  </div>
+                </div>
+                <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
+                  {sessionModalPlayers.map((lp: any) => {
+                    const present = sessionPresent.has(lp.playerId);
+                    return (
+                      <label
+                        key={lp.playerId}
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-all ${
+                          present ? 'border-orange-500/50 bg-orange-500/8' : 'border-slate-700 hover:border-slate-600'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={present}
+                          onChange={() => togglePresent(lp.playerId)}
+                          className="sr-only"
+                        />
+                        <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
+                          present ? 'border-orange-500 bg-orange-500' : 'border-slate-600'
+                        }`}>
+                          {present && <CheckCircle2 className="w-3 h-3 text-white" />}
+                        </div>
+                        <Avatar name={lp.player?.fullName} player={lp.player} size="sm" />
+                        <span className="text-sm text-white font-medium flex-1">{lp.player?.fullName}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Live match count calculation */}
+              {sessionPresent.size >= 2 && (() => {
+                const N = sessionPresent.size;
+                const M = sessionMaxPer;
+                const estimate = (N * M) / 2;
+                const isValid = (N * M) % 2 === 0;
+                const realCount = sessionPreview?.matchCount;
+                const displayCount = realCount ?? estimate;
+                const isEstimate = realCount === undefined;
+                return (
+                  <div className={`mb-4 px-3.5 py-3 rounded-xl border transition-all ${
+                    isValid
+                      ? 'bg-orange-500/8 border-orange-500/25'
+                      : 'bg-red-500/8 border-red-500/25'
+                  }`}>
+                    {isValid ? (
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-white">
+                            {isEstimate ? '~' : ''}{displayCount} meč{displayCount !== 1 ? 'a' : ''} večeras
+                          </p>
+                          <p className="text-xs text-slate-400 mt-0.5">
+                            {N} igrač{N !== 1 ? 'a' : ''} · svako igra {M} meč{M !== 1 ? 'a' : ''}
+                            {isEstimate && <span className="ml-1 opacity-60">(procena)</span>}
+                          </p>
+                        </div>
+                        <div className="text-2xl font-bold text-orange-400 tabular-nums shrink-0">
+                          {isEstimate ? '~' : ''}{displayCount}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-6 h-6 rounded-full bg-red-500/20 flex items-center justify-center shrink-0">
+                          <span className="text-red-400 text-xs font-bold">!</span>
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-red-400">Neparni raspored</p>
+                          <p className="text-xs text-slate-400 mt-0.5">
+                            {N} × {M} = {N * M} nije deljivo sa 2 — nije moguće ravnomerno rasporediti
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Preview */}
+              <button
+                onClick={loadPreview}
+                disabled={sessionPresent.size < 2 || previewLoading}
+                className="w-full py-2 rounded-lg border border-slate-700 text-slate-300 hover:border-slate-600 text-sm font-medium transition-colors mb-3 disabled:opacity-40"
+              >
+                {previewLoading
+                  ? <><span className="animate-spin inline-block w-3 h-3 border-2 border-slate-400/30 border-t-slate-300 rounded-full mr-2" />Računam...</>
+                  : 'Prikaži pregled mečeva'
+                }
+              </button>
+
+              {sessionPreview && (
+                <div className="mb-4 p-3 bg-slate-800/60 rounded-xl border border-slate-700">
+                  <p className="text-xs text-slate-400 mb-2">
+                    <span className="text-white font-semibold">{sessionPreview.matchCount}</span> mečeva biće generisano
+                    &nbsp;·&nbsp;{sessionPreview.presentCount} prisutnih igrača
+                    &nbsp;·&nbsp;Pool: {sessionPreview.poolSize} preostalo
+                  </p>
+                  {sessionPreview.matches?.slice(0, 5).map((m: any, i: number) => (
+                    <div key={m?.id ?? i} className="flex items-center justify-between text-xs py-1 border-t border-slate-700/50">
+                      <span className="text-slate-300">{m?.homePlayer?.fullName}</span>
+                      <span className="text-slate-600 px-2">vs</span>
+                      <span className="text-slate-300">{m?.awayPlayer?.fullName}</span>
+                    </div>
+                  ))}
+                  {sessionPreview.matchCount > 5 && (
+                    <p className="text-xs text-slate-500 text-center mt-1">+{sessionPreview.matchCount - 5} još</p>
+                  )}
+                </div>
               )}
+            </>
+          )}
+
+          {/* ── Manual mode info ── */}
+          {sessionManualMode && (
+            <div className="mb-4 px-3.5 py-3 rounded-xl border border-slate-700 bg-slate-800/40">
+              <p className="text-sm font-medium text-white mb-1">Manuelni unos mečeva</p>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Kreiraće se prazna sesija. Nakon toga možeš dodavati mečeve jedan po jedan — biraš domaćina i gosta za svaki meč.
+              </p>
             </div>
           )}
 
           <div className="flex gap-2">
             <button
               onClick={handleCreateSession}
-              disabled={creatingSession || sessionPresent.size < 2}
+              disabled={creatingSession || (!sessionManualMode && sessionPresent.size < 2)}
               className="btn-primary flex-1 justify-center text-sm disabled:opacity-40"
             >
               {creatingSession

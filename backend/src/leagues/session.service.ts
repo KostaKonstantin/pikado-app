@@ -158,13 +158,38 @@ export class SessionService {
       presentPlayerIds: string[];
       maxMatchesPerPlayer?: number;
       sessionDate?: string | null;
+      manualMode?: boolean;
     },
   ) {
     const league = await this.verifyLeague(clubId, leagueId);
 
-    const { presentPlayerIds, maxMatchesPerPlayer = 1, sessionDate = null } = body;
+    const { presentPlayerIds, maxMatchesPerPlayer = 1, sessionDate = null, manualMode = false } = body;
     const phaseId = this.activePhaseId(league);
 
+    // Next session number (per league)
+    const last = await this.sessionRepo.findOne({
+      where: { leagueId },
+      order: { sessionNumber: 'DESC' },
+    });
+    const sessionNumber = (last?.sessionNumber ?? 0) + 1;
+
+    // ── Manual mode: create empty session — matches added one-by-one via addManualMatch ──
+    if (manualMode) {
+      const session = await this.sessionRepo.save(
+        this.sessionRepo.create({
+          leagueId,
+          phaseId,
+          sessionNumber,
+          sessionDate,
+          status: 'open',
+          presentPlayerIds: [],
+          maxMatchesPerPlayer: 1,
+        }),
+      );
+      return this.getSession(clubId, leagueId, session.id);
+    }
+
+    // ── Auto mode: smart algorithm selects matches from pool ──
     if (presentPlayerIds.length < 2) {
       throw new BadRequestException('Potrebna su najmanje 2 prisutna igrača');
     }
@@ -177,13 +202,6 @@ export class SessionService {
         'Nema dostupnih mečeva za izabrane igrače — svi mečevi su već odigrani ili dodeljeni drugoj sesiji',
       );
     }
-
-    // Next session number (per league)
-    const last = await this.sessionRepo.findOne({
-      where: { leagueId },
-      order: { sessionNumber: 'DESC' },
-    });
-    const sessionNumber = (last?.sessionNumber ?? 0) + 1;
 
     const session = await this.sessionRepo.save(
       this.sessionRepo.create({
@@ -328,32 +346,38 @@ export class SessionService {
       return { canAdd: false, totalCount: 0, playedCount: 0, matchNumber: 0, isFromPool: false, status: 'invalid' };
     }
 
-    // Count all existing matches between this pair (either direction)
+    // Load session to scope queries to the correct phase (EvroLiga support)
+    const session = await this.sessionRepo.findOne({ where: { id: sessionId, leagueId } });
+    const phaseId = session?.phaseId ?? null;
+
+    const w1: any = { leagueId, homePlayerId, awayPlayerId };
+    const w2: any = { leagueId, homePlayerId: awayPlayerId, awayPlayerId: homePlayerId };
+    if (phaseId) { w1.phaseId = phaseId; w2.phaseId = phaseId; }
+
+    // Count all existing matches between this pair (either direction) — scoped to phase
     const [c1, c2] = await Promise.all([
-      this.matchRepo.count({ where: { leagueId, homePlayerId, awayPlayerId } }),
-      this.matchRepo.count({ where: { leagueId, homePlayerId: awayPlayerId, awayPlayerId: homePlayerId } }),
+      this.matchRepo.count({ where: w1 }),
+      this.matchRepo.count({ where: w2 }),
     ]);
     const totalCount = c1 + c2;
 
-    // Count completed matches between them
+    // Count completed matches between them — scoped to phase
     const [p1, p2] = await Promise.all([
-      this.matchRepo.count({ where: { leagueId, homePlayerId, awayPlayerId, status: MatchStatus.COMPLETED } }),
-      this.matchRepo.count({ where: { leagueId, homePlayerId: awayPlayerId, awayPlayerId: homePlayerId, status: MatchStatus.COMPLETED } }),
+      this.matchRepo.count({ where: { ...w1, status: MatchStatus.COMPLETED } }),
+      this.matchRepo.count({ where: { ...w2, status: MatchStatus.COMPLETED } }),
     ]);
     const playedCount = p1 + p2;
 
-    // Check if a pool match exists for this pair (unassigned, pending)
-    const poolMatch = await this.matchRepo.findOne({
-      where: [
-        { leagueId, homePlayerId, awayPlayerId, sessionId: IsNull(), status: MatchStatus.PENDING },
-        { leagueId, homePlayerId: awayPlayerId, awayPlayerId: homePlayerId, sessionId: IsNull(), status: MatchStatus.PENDING },
-      ],
-    });
+    // Check if a pool match exists for this pair (unassigned, pending) — scoped to phase
+    const pool1: any = { leagueId, homePlayerId, awayPlayerId, sessionId: IsNull(), status: MatchStatus.PENDING };
+    const pool2: any = { leagueId, homePlayerId: awayPlayerId, awayPlayerId: homePlayerId, sessionId: IsNull(), status: MatchStatus.PENDING };
+    if (phaseId) { pool1.phaseId = phaseId; pool2.phaseId = phaseId; }
+
+    const poolMatch = await this.matchRepo.findOne({ where: [pool1, pool2] });
     const isFromPool = !!poolMatch;
 
     // Can add if: pool match exists OR total < 2
     const canAdd = isFromPool || totalCount < 2;
-    const matchNumber = totalCount + (isFromPool ? 0 : 1); // pool match replaces existing count
 
     let status: string;
     if (!canAdd) status = 'blocked';
@@ -361,7 +385,25 @@ export class SessionService {
     else if (totalCount === 1) status = 'second';
     else status = 'first';
 
-    return { canAdd, totalCount, playedCount, matchNumber: isFromPool ? totalCount : totalCount + 1, isFromPool, status };
+    // For the 2nd match (not from pool): detect if direction will be reversed
+    let willReverse = false;
+    let actualHomeId: string = homePlayerId;
+    let actualAwayId: string = awayPlayerId;
+    if (canAdd && !isFromPool && totalCount === 1) {
+      const existing = await this.matchRepo.findOne({ where: [w1, w2] });
+      if (existing) {
+        actualHomeId = existing.awayPlayerId!;
+        actualAwayId = existing.homePlayerId!;
+        willReverse = actualHomeId !== homePlayerId;
+      }
+    } else if (isFromPool && poolMatch) {
+      // Pool match direction is fixed — show actual direction
+      actualHomeId = poolMatch.homePlayerId!;
+      actualAwayId = poolMatch.awayPlayerId!;
+      willReverse = actualHomeId !== homePlayerId;
+    }
+
+    return { canAdd, totalCount, playedCount, matchNumber: isFromPool ? totalCount : totalCount + 1, isFromPool, status, willReverse, actualHomeId, actualAwayId };
   }
 
   // ─── Manual match: add to session ────────────────────────────────────────────
@@ -379,12 +421,15 @@ export class SessionService {
     if (session.status === 'closed') throw new BadRequestException('Sesija je zatvorena');
     if (homePlayerId === awayPlayerId) throw new BadRequestException('Igrači moraju biti različiti');
 
-    // Try to find an existing pool match for this pair
+    // Scope all queries to the session's phase (EvroLiga support)
+    const phaseId = session.phaseId ?? null;
+    const pool1: any = { leagueId, homePlayerId, awayPlayerId, sessionId: IsNull(), status: MatchStatus.PENDING };
+    const pool2: any = { leagueId, homePlayerId: awayPlayerId, awayPlayerId: homePlayerId, sessionId: IsNull(), status: MatchStatus.PENDING };
+    if (phaseId) { pool1.phaseId = phaseId; pool2.phaseId = phaseId; }
+
+    // Try to find an existing pool match for this pair — scoped to phase
     const poolMatch = await this.matchRepo.findOne({
-      where: [
-        { leagueId, homePlayerId, awayPlayerId, sessionId: IsNull(), status: MatchStatus.PENDING },
-        { leagueId, homePlayerId: awayPlayerId, awayPlayerId: homePlayerId, sessionId: IsNull(), status: MatchStatus.PENDING },
-      ],
+      where: [pool1, pool2],
       relations: ['homePlayer', 'awayPlayer'],
     });
 
@@ -398,26 +443,26 @@ export class SessionService {
       return this.matchRepo.findOne({ where: { id: poolMatch.id }, relations: ['homePlayer', 'awayPlayer'] });
     }
 
-    // No pool match — validate pair limit
+    // No pool match — validate pair limit scoped to phase
+    const w1: any = { leagueId, homePlayerId, awayPlayerId };
+    const w2: any = { leagueId, homePlayerId: awayPlayerId, awayPlayerId: homePlayerId };
+    if (phaseId) { w1.phaseId = phaseId; w2.phaseId = phaseId; }
+
     const [c1, c2] = await Promise.all([
-      this.matchRepo.count({ where: { leagueId, homePlayerId, awayPlayerId } }),
-      this.matchRepo.count({ where: { leagueId, homePlayerId: awayPlayerId, awayPlayerId: homePlayerId } }),
+      this.matchRepo.count({ where: w1 }),
+      this.matchRepo.count({ where: w2 }),
     ]);
     if (c1 + c2 >= 2) {
       throw new BadRequestException('Ovi igrači su već odigrali oba predviđena meča u ligi');
     }
 
-    // Determine home/away for 2nd match (enforce reversal)
+    // For 2nd match: enforce reversal so home/away alternates between the two meetings
     let finalHomeId = homePlayerId;
     let finalAwayId = awayPlayerId;
     if (c1 + c2 === 1) {
-      const existing = await this.matchRepo.findOne({
-        where: [
-          { leagueId, homePlayerId, awayPlayerId },
-          { leagueId, homePlayerId: awayPlayerId, awayPlayerId: homePlayerId },
-        ],
-      });
+      const existing = await this.matchRepo.findOne({ where: [w1, w2] });
       if (existing) {
+        // Reverse: whoever was home before becomes away now
         finalHomeId = existing.awayPlayerId!;
         finalAwayId = existing.homePlayerId!;
       }
@@ -433,6 +478,7 @@ export class SessionService {
     const created = await this.matchRepo.save(
       this.matchRepo.create({
         leagueId,
+        phaseId,
         homePlayerId: finalHomeId,
         awayPlayerId: finalAwayId,
         sessionId,

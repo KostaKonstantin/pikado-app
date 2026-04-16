@@ -191,7 +191,7 @@ export class LeaguesController {
   createSession(
     @Param('clubId') clubId: string,
     @Param('id') id: string,
-    @Body() body: { presentPlayerIds: string[]; maxMatchesPerPlayer?: number; sessionDate?: string | null },
+    @Body() body: { presentPlayerIds: string[]; maxMatchesPerPlayer?: number; sessionDate?: string | null; manualMode?: boolean },
   ) {
     return this.sessionService.createSession(clubId, id, body);
   }
