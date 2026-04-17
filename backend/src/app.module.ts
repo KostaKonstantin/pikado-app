@@ -45,7 +45,7 @@ import { ShareToken } from './share/entities/share-token.entity';
         League, LeaguePlayer, LeagueMatch, LeagueSession, LeagueSubstitution, CompetitionPhase, Ranking,
         Invite, ShareToken,
       ],
-      synchronize: true,
+      synchronize: process.env.NODE_ENV !== 'production',
       logging: process.env.NODE_ENV === 'development',
       ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
     }),
