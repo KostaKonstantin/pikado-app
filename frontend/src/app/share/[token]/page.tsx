@@ -176,11 +176,12 @@ export default function SharePage() {
           <div className="bg-slate-800 rounded-2xl overflow-hidden shadow-xl">
 
             {/* Column headers */}
-            <div className="grid grid-cols-[2.5rem_1fr_2.5rem_2.5rem_2.5rem_3rem] gap-x-2 px-4 py-2.5 border-b border-slate-700 text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
+            <div className="grid grid-cols-[2.5rem_1fr_2.5rem_2.5rem_2.5rem_2.5rem_3rem] gap-x-2 px-4 py-2.5 border-b border-slate-700 text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
               <span className="text-center">#</span>
               <span>Igrač</span>
               <span className="text-center">M</span>
               <span className="text-center text-green-400">P</span>
+              <span className="text-center text-yellow-400">R</span>
               <span className="text-center text-red-400">G</span>
               <span className="text-right text-orange-400">Bod</span>
             </div>
@@ -192,7 +193,7 @@ export default function SharePage() {
             {data.standings.map((s, idx) => (
               <div
                 key={s.player?.id ?? idx}
-                className="grid grid-cols-[2.5rem_1fr_2.5rem_2.5rem_2.5rem_3rem] gap-x-2 items-center px-4 py-3 border-b border-slate-700/40 last:border-0"
+                className="grid grid-cols-[2.5rem_1fr_2.5rem_2.5rem_2.5rem_2.5rem_3rem] gap-x-2 items-center px-4 py-3 border-b border-slate-700/40 last:border-0"
               >
                 <div className="flex justify-center">
                   <RankBadge pos={s.position} />
@@ -210,6 +211,7 @@ export default function SharePage() {
 
                 <span className="text-center text-sm text-slate-400 tabular-nums">{s.played}</span>
                 <span className="text-center text-sm text-green-400 tabular-nums font-semibold">{s.won}</span>
+                <span className="text-center text-sm text-yellow-400 tabular-nums font-semibold">{s.drawn}</span>
                 <span className="text-center text-sm text-red-400 tabular-nums font-semibold">{s.lost}</span>
                 <span className="text-right text-sm font-bold text-orange-400 tabular-nums">{s.points}</span>
               </div>
