@@ -176,7 +176,7 @@ export default function SharePage() {
           <div className="bg-slate-800 rounded-2xl overflow-hidden shadow-xl">
 
             {/* Column headers */}
-            <div className="grid grid-cols-[2.5rem_1fr_2.5rem_2.5rem_2.5rem_2.5rem_3rem] gap-x-2 px-4 py-2.5 border-b border-slate-700 text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
+            <div className="grid grid-cols-[1.5rem_1fr_1.75rem_1.75rem_1.75rem_1.75rem_2.25rem] sm:grid-cols-[2.5rem_1fr_2.5rem_2.5rem_2.5rem_2.5rem_3rem] gap-x-1 sm:gap-x-2 px-2 sm:px-4 py-2.5 border-b border-slate-700 text-[9px] sm:text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
               <span className="text-center">#</span>
               <span>Igrač</span>
               <span className="text-center">M</span>
@@ -193,7 +193,7 @@ export default function SharePage() {
             {data.standings.map((s, idx) => (
               <div
                 key={s.player?.id ?? idx}
-                className="grid grid-cols-[2.5rem_1fr_2.5rem_2.5rem_2.5rem_2.5rem_3rem] gap-x-2 items-center px-4 py-3 border-b border-slate-700/40 last:border-0"
+                className="grid grid-cols-[1.5rem_1fr_1.75rem_1.75rem_1.75rem_1.75rem_2.25rem] sm:grid-cols-[2.5rem_1fr_2.5rem_2.5rem_2.5rem_2.5rem_3rem] gap-x-1 sm:gap-x-2 items-center px-2 sm:px-4 py-2.5 sm:py-3 border-b border-slate-700/40 last:border-0"
               >
                 <div className="flex justify-center">
                   <RankBadge pos={s.position} />
@@ -201,19 +201,19 @@ export default function SharePage() {
 
                 {/* Player name + sets */}
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-white truncate leading-tight">
+                  <p className="text-xs sm:text-sm font-semibold text-white truncate leading-tight">
                     {s.player?.fullName ?? '—'}
                   </p>
-                  <p className="text-[11px] text-slate-500 leading-none mt-0.5 tabular-nums">
+                  <p className="text-[10px] text-slate-500 leading-none mt-0.5 tabular-nums">
                     {s.setsFor}:{s.setsAgainst}
                   </p>
                 </div>
 
-                <span className="text-center text-sm text-slate-400 tabular-nums">{s.played}</span>
-                <span className="text-center text-sm text-green-400 tabular-nums font-semibold">{s.won}</span>
-                <span className="text-center text-sm text-yellow-400 tabular-nums font-semibold">{s.drawn}</span>
-                <span className="text-center text-sm text-red-400 tabular-nums font-semibold">{s.lost}</span>
-                <span className="text-right text-sm font-bold text-orange-400 tabular-nums">{s.points}</span>
+                <span className="text-center text-xs sm:text-sm text-slate-400 tabular-nums">{s.played}</span>
+                <span className="text-center text-xs sm:text-sm text-green-400 tabular-nums font-semibold">{s.won}</span>
+                <span className="text-center text-xs sm:text-sm text-yellow-400 tabular-nums font-semibold">{s.drawn}</span>
+                <span className="text-center text-xs sm:text-sm text-red-400 tabular-nums font-semibold">{s.lost}</span>
+                <span className="text-right text-xs sm:text-sm font-bold text-orange-400 tabular-nums">{s.points}</span>
               </div>
             ))}
           </div>
@@ -271,18 +271,18 @@ export default function SharePage() {
                     const awayWon = isDone && m.winnerId === m.awayPlayer?.id;
 
                     return (
-                      <div key={m.id} className="px-4 py-3.5 border-b border-slate-700/40 last:border-0">
-                        <div className="flex items-center gap-2">
+                      <div key={m.id} className="px-2 sm:px-4 py-2.5 sm:py-3.5 border-b border-slate-700/40 last:border-0">
+                        <div className="flex items-center gap-1.5 sm:gap-2">
 
                           {/* Home player */}
-                          <p className={`flex-1 text-sm text-right leading-tight truncate ${
+                          <p className={`flex-1 text-xs sm:text-sm text-right leading-tight truncate ${
                             homeWon ? 'font-bold text-white' : 'text-slate-300'
                           }`}>
                             {m.homePlayer?.fullName ?? '—'}
                           </p>
 
                           {/* Score / status — fixed width so names get equal space */}
-                          <div className="shrink-0 w-16 text-center">
+                          <div className="shrink-0 w-12 sm:w-16 text-center">
                             {isDone ? (
                               <span className="text-sm font-bold text-orange-400 tabular-nums">
                                 {m.homeSets} : {m.awaySets}
@@ -297,7 +297,7 @@ export default function SharePage() {
                           </div>
 
                           {/* Away player */}
-                          <p className={`flex-1 text-sm leading-tight truncate ${
+                          <p className={`flex-1 text-xs sm:text-sm leading-tight truncate ${
                             awayWon ? 'font-bold text-white' : 'text-slate-300'
                           }`}>
                             {m.awayPlayer?.fullName ?? '—'}
