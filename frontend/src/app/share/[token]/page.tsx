@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import { Target, RefreshCw, Trophy, Calendar, CheckCircle2, Clock, ChevronDown } from 'lucide-react';
+import { RefreshCw, Trophy, Calendar, CheckCircle2, Clock, ChevronDown } from 'lucide-react';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3099').replace(/\/$/, '');
 
@@ -120,9 +120,7 @@ export default function SharePage() {
         style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)', paddingBottom: '16px' }}
       >
         <div className="max-w-lg mx-auto flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-            <Target className="w-5 h-5 text-white" />
-          </div>
+          <img src="/logo.svg" alt="Pikado" className="w-10 h-10 rounded-xl shrink-0" />
           <div className="flex-1 min-w-0">
             <p className="text-xs text-orange-100 font-medium tracking-wide">Pikado App · Liga</p>
             <h1 className="text-base font-bold text-white truncate leading-tight mt-0.5">
