@@ -44,10 +44,10 @@ type ShareData = {
 
 function RankBadge({ pos }: { pos: number }) {
   const cls =
-    pos === 1 ? 'bg-yellow-400 text-black' :
-    pos === 2 ? 'bg-slate-300 text-black' :
-    pos === 3 ? 'bg-amber-600 text-white' :
-                'bg-slate-700 text-slate-300';
+    pos === 1 ? 'bg-yellow-400 text-black shadow-yellow-400/30 shadow-md' :
+    pos === 2 ? 'bg-slate-300 text-slate-900 shadow-slate-300/20 shadow-md' :
+    pos === 3 ? 'bg-amber-600 text-white shadow-amber-600/25 shadow-md' :
+                'bg-slate-700/80 text-slate-400';
   return (
     <span className={`w-7 h-7 rounded-full inline-flex items-center justify-center text-xs font-bold shrink-0 ${cls}`}>
       {pos}
@@ -173,49 +173,73 @@ export default function SharePage() {
 
         {/* ── Standings tab ───────────────────────────────────────────────── */}
         {!loading && data && activeTab === 'tabela' && (
-          <div className="bg-slate-800 rounded-2xl overflow-hidden shadow-xl">
+          <div className="rounded-2xl overflow-hidden shadow-2xl border border-orange-500">
 
             {/* Column headers */}
-            <div className="grid grid-cols-[2rem_1fr_2rem_2rem_2rem_2rem_2.5rem] gap-x-1.5 px-2 sm:px-4 py-2.5 border-b border-slate-700 text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
-              <span className="text-center">#</span>
-              <span>Igrač</span>
-              <span className="text-center">M</span>
-              <span className="text-center text-green-400">P</span>
-              <span className="text-center text-yellow-400">R</span>
-              <span className="text-center text-red-400">G</span>
-              <span className="text-right text-orange-400">Bod</span>
+            <div className="flex items-center bg-slate-800/90 px-3 sm:px-4 h-9 border-b border-slate-700/60">
+              <div className="w-9 shrink-0" />
+              <div className="flex-1 min-w-0 text-[10px] font-semibold text-slate-500 uppercase tracking-widest">
+                Igrač
+              </div>
+              <div className="flex shrink-0">
+                <span className="w-7 text-center text-[10px] font-semibold text-slate-500 uppercase tracking-wider">M</span>
+                <span className="w-7 text-center text-[10px] font-semibold text-green-500/80 uppercase tracking-wider">P</span>
+                <span className="w-7 text-center text-[10px] font-semibold text-yellow-500/80 uppercase tracking-wider">R</span>
+                <span className="w-7 text-center text-[10px] font-semibold text-red-500/80 uppercase tracking-wider">G</span>
+                <span className="w-10 text-right text-[10px] font-semibold text-orange-400 uppercase tracking-wider">Bod</span>
+              </div>
             </div>
 
             {data.standings.length === 0 && (
-              <p className="text-center text-slate-500 text-sm py-10">Još nema odigranih mečeva</p>
+              <div className="bg-slate-800 py-12">
+                <p className="text-center text-slate-500 text-sm">Još nema odigranih mečeva</p>
+              </div>
             )}
 
-            {data.standings.map((s, idx) => (
-              <div
-                key={s.player?.id ?? idx}
-                className="grid grid-cols-[2rem_1fr_2rem_2rem_2rem_2rem_2.5rem] gap-x-1.5 items-center px-2 sm:px-4 py-2.5 border-b border-slate-700/40 last:border-0"
-              >
-                <div className="flex justify-center">
-                  <RankBadge pos={s.position} />
-                </div>
+            {data.standings.map((s, idx) => {
+              const accentColor =
+                s.position === 1 ? 'bg-yellow-400' :
+                s.position === 2 ? 'bg-slate-300' :
+                s.position === 3 ? 'bg-amber-600' : '';
 
-                {/* Player name + sets */}
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-white truncate leading-tight">
-                    {s.player?.fullName ?? '—'}
-                  </p>
-                  <p className="text-[10px] text-slate-500 leading-none mt-0.5 tabular-nums">
-                    {s.setsFor}:{s.setsAgainst}
-                  </p>
-                </div>
+              return (
+                <div
+                  key={s.player?.id ?? idx}
+                  className={`relative flex items-center px-3 sm:px-4 py-3.5 border-b border-slate-700/25 last:border-0 ${
+                    idx % 2 === 0 ? 'bg-slate-800' : 'bg-slate-800/60'
+                  }`}
+                >
+                  {/* Top-3 accent line */}
+                  {s.position <= 3 && (
+                    <div className={`absolute left-0 top-0 bottom-0 w-0.75 rounded-r-full ${accentColor}`} />
+                  )}
 
-                <span className="text-center text-xs text-slate-400 tabular-nums">{s.played}</span>
-                <span className="text-center text-xs text-green-400 tabular-nums font-semibold">{s.won}</span>
-                <span className="text-center text-xs text-yellow-400 tabular-nums font-semibold">{s.drawn}</span>
-                <span className="text-center text-xs text-red-400 tabular-nums font-semibold">{s.lost}</span>
-                <span className="text-right text-xs font-bold text-orange-400 tabular-nums">{s.points}</span>
-              </div>
-            ))}
+                  {/* Rank badge */}
+                  <div className="w-9 shrink-0 flex justify-center">
+                    <RankBadge pos={s.position} />
+                  </div>
+
+                  {/* Player name + sets ratio */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-white truncate leading-snug">
+                      {s.player?.fullName ?? '—'}
+                    </p>
+                    <p className="text-[10px] text-slate-500 tabular-nums mt-0.5 leading-none">
+                      {s.setsFor}:{s.setsAgainst}
+                    </p>
+                  </div>
+
+                  {/* Stats */}
+                  <div className="flex shrink-0">
+                    <span className="w-7 text-center text-sm text-slate-400 tabular-nums">{s.played}</span>
+                    <span className="w-7 text-center text-sm text-green-400 tabular-nums font-semibold">{s.won}</span>
+                    <span className="w-7 text-center text-sm text-yellow-400 tabular-nums font-semibold">{s.drawn}</span>
+                    <span className="w-7 text-center text-sm text-red-400 tabular-nums font-semibold">{s.lost}</span>
+                    <span className="w-10 text-right text-sm font-bold text-orange-400 tabular-nums">{s.points}</span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -271,7 +295,7 @@ export default function SharePage() {
                     const awayWon = isDone && m.winnerId === m.awayPlayer?.id;
 
                     return (
-                      <div key={m.id} className="px-3 py-2.5 border-b border-slate-700/40 last:border-0">
+                      <div key={m.id} className="px-3 sm:px-4 py-2.5 sm:py-3.5 border-b border-slate-700/40 last:border-0">
                         <div className="flex items-center gap-2">
 
                           {/* Home player */}
@@ -282,7 +306,7 @@ export default function SharePage() {
                           </p>
 
                           {/* Score / status — fixed width so names get equal space */}
-                          <div className="shrink-0 w-14 text-center">
+                          <div className="shrink-0 w-14 sm:w-16 text-center">
                             {isDone ? (
                               <span className="text-sm font-bold text-orange-400 tabular-nums">
                                 {m.homeSets} : {m.awaySets}
