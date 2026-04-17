@@ -52,7 +52,7 @@ export class League {
   status: LeagueStatus;
 
   /** 'round' = full schedule upfront; 'session' = flexible evening-based; 'euroleague' = multi-phase competition */
-  @Column({ default: 'round' })
+  @Column({ name: 'league_mode', default: 'round' })
   mode: string;
 
   /** Points to the currently active CompetitionPhase (euroleague only) */
