@@ -12,6 +12,7 @@ import { LeaguesModule } from './leagues/leagues.module';
 import { RankingsModule } from './rankings/rankings.module';
 import { LiveModule } from './live/live.module';
 import { InvitesModule } from './invites/invites.module';
+import { ShareModule } from './share/share.module';
 
 // Entities
 import { User } from './users/entities/user.entity';
@@ -30,6 +31,7 @@ import { LeagueSession } from './leagues/entities/league-session.entity';
 import { LeagueSubstitution } from './leagues/entities/league-substitution.entity';
 import { CompetitionPhase } from './leagues/entities/competition-phase.entity';
 import { Ranking } from './rankings/entities/ranking.entity';
+import { ShareToken } from './share/entities/share-token.entity';
 
 @Module({
   imports: [
@@ -41,7 +43,7 @@ import { Ranking } from './rankings/entities/ranking.entity';
         User, Club, Membership, Player, Season,
         Tournament, TournamentPlayer, Match,
         League, LeaguePlayer, LeagueMatch, LeagueSession, LeagueSubstitution, CompetitionPhase, Ranking,
-        Invite,
+        Invite, ShareToken,
       ],
       synchronize: true,
       logging: process.env.NODE_ENV === 'development',
@@ -58,6 +60,7 @@ import { Ranking } from './rankings/entities/ranking.entity';
     RankingsModule,
     LiveModule,
     InvitesModule,
+    ShareModule,
   ],
 })
 export class AppModule {}

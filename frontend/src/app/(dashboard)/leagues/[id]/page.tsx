@@ -4,6 +4,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/store/auth.store';
 import { leaguesApi } from '@/lib/api/leagues.api';
+import api from '@/lib/api/client';
 import { playersApi } from '@/lib/api/players.api';
 import { Topbar } from '@/components/layout/topbar';
 import { LeagueSkeleton } from '@/components/ui/skeleton';
@@ -168,6 +169,87 @@ function PlayerCombobox({
   );
 }
 
+/* ─── ShareModal ────────────────────────────────────────────────────── */
+function ShareModal({
+  leagueId, shareToken, shareLoading, setShareToken, setShareLoading, copied, setCopied, onClose,
+}: {
+  leagueId: string | undefined;
+  shareToken: string | null;
+  shareLoading: boolean;
+  setShareToken: (t: string) => void;
+  setShareLoading: (v: boolean) => void;
+  copied: boolean;
+  setCopied: (v: boolean) => void;
+  onClose: () => void;
+}) {
+  const origin = typeof window !== 'undefined'
+    ? (process.env.NEXT_PUBLIC_APP_URL || window.location.origin)
+    : '';
+  const shareUrl = shareToken ? `${origin}/share/${shareToken}` : null;
+
+  useEffect(() => {
+    if (shareToken || !leagueId) return;
+    setShareLoading(true);
+    api.post('/share/generate', { leagueId })
+      .then((res) => setShareToken(res.data.token))
+      .catch(() => {/* silently fail — user can close and retry */})
+      .finally(() => setShareLoading(false));
+  }, [leagueId]);
+
+  const handleCopy = () => {
+    if (!shareUrl) return;
+    navigator.clipboard.writeText(shareUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <div className="flex items-center justify-between mb-5">
+        <h3 className="font-semibold text-white flex items-center gap-2">
+          <QrCode className="w-4 h-4 text-orange-400" /> Podeli ligu
+        </h3>
+        <button onClick={onClose} className="p-1 text-slate-400 hover:text-white rounded-lg transition-colors">
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+
+      <p className="text-xs text-slate-400 mb-5">
+        Skeniraj QR ili podeli link. Primaoci vide tabelu i mečeve — bez prijave, samo za čitanje.
+      </p>
+
+      {shareLoading || !shareUrl ? (
+        <div className="flex flex-col items-center gap-3 py-8">
+          <div className="w-8 h-8 border-2 border-orange-400/30 border-t-orange-400 rounded-full animate-spin" />
+          <p className="text-xs text-slate-500">Generišem link...</p>
+        </div>
+      ) : (
+        <>
+          <div className="flex justify-center mb-5">
+            <div className="bg-white p-4 rounded-2xl shadow-xl">
+              <QRCodeSVG value={shareUrl} size={200} />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 bg-slate-800 rounded-xl px-3 py-2.5 border border-slate-700">
+            <span className="text-xs text-slate-400 flex-1 truncate font-mono">{shareUrl}</span>
+            <button
+              onClick={handleCopy}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-orange-500/15 text-orange-400 hover:bg-orange-500/25 transition-colors font-medium shrink-0"
+            >
+              {copied ? <><Check className="w-3.5 h-3.5" /> Kopirano</> : <><Copy className="w-3.5 h-3.5" /> Kopiraj</>}
+            </button>
+          </div>
+
+          <p className="text-[11px] text-slate-600 mt-3 text-center">
+            Tabela i mečevi se automatski osvežavaju svakih 30 sekundi
+          </p>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 /* ─── main component ────────────────────────────────────────────────── */
 export default function LeagueDetailPage() {
   const params = useParams();
@@ -233,8 +315,10 @@ export default function LeagueDetailPage() {
   const [subSaving, setSubSaving]             = useState(false);
 
   // QR code modal
-  const [showQr, setShowQr]   = useState(false);
-  const [copied, setCopied]   = useState(false);
+  const [showQr, setShowQr]       = useState(false);
+  const [copied, setCopied]       = useState(false);
+  const [shareToken, setShareToken] = useState<string | null>(null);
+  const [shareLoading, setShareLoading] = useState(false);
 
   // Matrix tab
   const [matrixCell, setMatrixCell]           = useState<{ aId: string; bId: string } | null>(null);
@@ -843,11 +927,20 @@ export default function LeagueDetailPage() {
 
       <div className="p-4 md:p-6 space-y-5">
 
-        {/* Back */}
-        <Link href="/leagues" className="inline-flex items-center gap-1.5 text-slate-400 hover:text-white text-sm transition-colors group">
-          <ArrowLeft className="w-4 h-4 transition-transform group-hover:-translate-x-0.5" />
-          Sve lige
-        </Link>
+        {/* Back + Share */}
+        <div className="flex items-center justify-between">
+          <Link href="/leagues" className="inline-flex items-center gap-1.5 text-slate-400 hover:text-white text-sm transition-colors group">
+            <ArrowLeft className="w-4 h-4 transition-transform group-hover:-translate-x-0.5" />
+            Sve lige
+          </Link>
+          <button
+            onClick={() => setShowQr(true)}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 text-xs font-medium hover:bg-slate-700 hover:text-white transition-all"
+          >
+            <QrCode className="w-3.5 h-3.5 shrink-0" />
+            Podeli
+          </button>
+        </div>
 
         {/* League stats bar — all values dynamic from formula, not hardcoded */}
         {stats && stats.playerCount >= 2 && (
@@ -2500,54 +2593,19 @@ export default function LeagueDetailPage() {
         </Modal>
       )}
 
-      {/* ══ MODAL: QR kod ════════════════════════════════════════ */}
-      {showQr && league?.slug && (() => {
-        const origin = process.env.NEXT_PUBLIC_APP_URL || (typeof window !== 'undefined' ? window.location.origin : '');
-        const publicUrl = `${origin}/public/leagues/${league.slug}`;
-        const handleCopy = () => {
-          navigator.clipboard.writeText(publicUrl);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 2000);
-        };
-        return (
-          <Modal onClose={() => setShowQr(false)}>
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="font-semibold text-white flex items-center gap-2">
-                <QrCode className="w-4 h-4 text-orange-400" /> Javna tabela — QR kod
-              </h3>
-              <button onClick={() => setShowQr(false)} className="p-1 text-slate-400 hover:text-white rounded-lg transition-colors">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-400 mb-5">
-              Skeniraj QR ili podeli link. Igrači mogu videti tabelu bez prijave u aplikaciju.
-            </p>
-
-            {/* QR code */}
-            <div className="flex justify-center mb-5">
-              <div className="bg-white p-4 rounded-2xl shadow-xl">
-                <QRCodeSVG value={publicUrl} size={200} />
-              </div>
-            </div>
-
-            {/* URL + copy */}
-            <div className="flex items-center gap-2 bg-slate-800 rounded-xl px-3 py-2.5 border border-slate-700">
-              <span className="text-xs text-slate-400 flex-1 truncate font-mono">{publicUrl}</span>
-              <button
-                onClick={handleCopy}
-                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-orange-500/15 text-orange-400 hover:bg-orange-500/25 transition-colors font-medium shrink-0"
-              >
-                {copied ? <><Check className="w-3.5 h-3.5" /> Kopirano</> : <><Copy className="w-3.5 h-3.5" /> Kopiraj</>}
-              </button>
-            </div>
-
-            <p className="text-[11px] text-slate-600 mt-3 text-center">
-              Tabela se automatski osvežava svakih 60 sekundi
-            </p>
-          </Modal>
-        );
-      })()}
+      {/* ══ MODAL: QR kod (share link) ═══════════════════════════ */}
+      {showQr && (
+        <ShareModal
+          leagueId={league?.id}
+          shareToken={shareToken}
+          shareLoading={shareLoading}
+          setShareToken={setShareToken}
+          setShareLoading={setShareLoading}
+          copied={copied}
+          setCopied={setCopied}
+          onClose={() => setShowQr(false)}
+        />
+      )}
 
       {/* ══ MODAL: Nova sesija ═══════════════════════════════════ */}
       {newSessionOpen && (
@@ -5512,6 +5570,27 @@ export default function LeagueDetailPage() {
                         </div>
                       </button>
                     )}
+
+                    {/* Podeli ligu */}
+                    <button
+                      onClick={() => {
+                        setShowMoreSheet(false);
+                        setShowQr(true);
+                      }}
+                      className="w-full flex items-center gap-3.5 px-4 py-3.5 rounded-xl mb-2 transition-all active:scale-[0.98]"
+                      style={{ backgroundColor: 'var(--bg-secondary)' }}
+                    >
+                      <div
+                        className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+                        style={{ backgroundColor: 'rgba(249,115,22,0.12)' }}
+                      >
+                        <QrCode className="w-4 h-4 text-orange-400" />
+                      </div>
+                      <div className="text-left">
+                        <span className="text-sm font-medium text-white block">Podeli ligu</span>
+                        <span className="text-xs text-slate-500">Generiši link za čitanje</span>
+                      </div>
+                    </button>
 
                     {/* Zatvori sesiju — destructive */}
                     <button
