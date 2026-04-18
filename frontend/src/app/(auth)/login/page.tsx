@@ -94,12 +94,12 @@ export default function LoginPage() {
         </button>
       </form>
 
-      {/* <p className="text-center text-sm mt-6" style={{ color: 'var(--text-secondary)' }}>
+      <p className="text-center text-sm mt-6" style={{ color: 'var(--text-secondary)' }}>
         Nemate nalog?{' '}
         <Link href="/register" className="text-orange-400 hover:text-orange-300 font-medium transition-colors">
           Registrujte se
         </Link>
-      </p> */}
+      </p>
     </div>
   );
 }
