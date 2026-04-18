@@ -1,13 +1,15 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import { RefreshCw, Trophy, Calendar, CheckCircle2, Clock, ChevronDown } from 'lucide-react';
+import { RefreshCw, Trophy, Calendar, CheckCircle2, Clock, ChevronDown, ChevronUp } from 'lucide-react';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3099').replace(/\/$/, '');
 
+type Player = { id: string; fullName: string };
+
 type StandingRow = {
   position: number;
-  player: { id: string; fullName: string } | null;
+  player: Player | null;
   played: number;
   won: number;
   lost: number;
@@ -19,8 +21,8 @@ type StandingRow = {
 
 type MatchRow = {
   id: string;
-  homePlayer: { id: string; fullName: string } | null;
-  awayPlayer: { id: string; fullName: string } | null;
+  homePlayer: Player | null;
+  awayPlayer: Player | null;
   homeSets: number;
   awaySets: number;
   status: string;
@@ -55,7 +57,7 @@ function RankBadge({ pos }: { pos: number }) {
   );
 }
 
-type ActiveTab = 'tabela' | 'mecevi';
+type ActiveTab = 'tabela' | 'mecevi' | 'dvoboji';
 
 export default function SharePage() {
   const { token } = useParams<{ token: string }>();
@@ -65,11 +67,21 @@ export default function SharePage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [activeTab, setActiveTab] = useState<ActiveTab>('tabela');
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
+  const [dvobojiPlayerId, setDvobojiPlayerId] = useState<string>('');
+  const [expandedPairs, setExpandedPairs] = useState<Set<string>>(new Set());
 
   const toggleGroup = (label: number) => {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
       next.has(label) ? next.delete(label) : next.add(label);
+      return next;
+    });
+  };
+
+  const togglePair = (opponentId: string) => {
+    setExpandedPairs((prev) => {
+      const next = new Set(prev);
+      next.has(opponentId) ? next.delete(opponentId) : next.add(opponentId);
       return next;
     });
   };
@@ -83,9 +95,11 @@ export default function SharePage() {
       setData(d);
       setLastUpdated(new Date());
       setError('');
-      // Auto-open only the last group
       if (d.groups.length > 0) {
         setExpandedGroups(new Set([d.groups[d.groups.length - 1].label]));
+      }
+      if (d.standings.length > 0 && d.standings[0].player) {
+        setDvobojiPlayerId(d.standings[0].player.id);
       }
     } catch {
       setError('Link nije validan ili liga više ne postoji.');
@@ -109,12 +123,47 @@ export default function SharePage() {
   const groupLabel = (g: Group) =>
     data?.isEuroleague ? `Ligaški Dan ${g.label}` : `Kolo ${g.label}`;
 
+  /* ── Dvoboji helpers ── */
+  const allMatches = data ? data.groups.flatMap(g => g.matches) : [];
+  const expectedPerPair = data?.league.format === 'home_away' ? 2 : 1;
+  const dvobojiPlayers = data ? data.standings.map(s => s.player).filter(Boolean) as Player[] : [];
+  const selectedPlayer = dvobojiPlayers.find(p => p.id === dvobojiPlayerId) ?? dvobojiPlayers[0];
+
+  const dvobojiOpponents = selectedPlayer
+    ? dvobojiPlayers
+        .filter(p => p.id !== selectedPlayer.id)
+        .map(opponent => {
+          const between = allMatches.filter(m =>
+            (m.homePlayer?.id === selectedPlayer.id && m.awayPlayer?.id === opponent.id) ||
+            (m.homePlayer?.id === opponent.id && m.awayPlayer?.id === selectedPlayer.id),
+          );
+          const completed = between.filter(m => m.status === 'completed');
+          let status: 'completed' | 'partial' | 'upcoming' | 'not_played';
+          if (between.length === 0)                    status = 'not_played';
+          else if (completed.length === 0)             status = 'upcoming';
+          else if (completed.length >= expectedPerPair) status = 'completed';
+          else                                          status = 'partial';
+          return { opponent, between, completed, status };
+        })
+        .sort((a, b) => {
+          const order = { not_played: 0, upcoming: 1, partial: 2, completed: 3 };
+          return order[a.status] - order[b.status];
+        })
+    : [];
+
+  const pairStats = {
+    completed:  dvobojiOpponents.filter(o => o.status === 'completed').length,
+    partial:    dvobojiOpponents.filter(o => o.status === 'partial').length,
+    upcoming:   dvobojiOpponents.filter(o => o.status === 'upcoming').length,
+    not_played: dvobojiOpponents.filter(o => o.status === 'not_played').length,
+  };
+
   return (
     <div
       className="min-h-screen bg-[#0f172a] text-white"
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 16px)' }}
     >
-      {/* ── Header ────────────────────────────────────────────────────────── */}
+      {/* ── Header ── */}
       <div
         className="bg-orange-500 px-4"
         style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)', paddingBottom: '16px' }}
@@ -127,7 +176,6 @@ export default function SharePage() {
               {loading && !data ? '...' : (data?.league?.name ?? 'Nepoznata liga')}
             </h1>
           </div>
-          {/* Refresh — 44×44 touch target */}
           <button
             onClick={load}
             disabled={loading}
@@ -139,10 +187,10 @@ export default function SharePage() {
         </div>
       </div>
 
-      {/* ── Sticky tabs ───────────────────────────────────────────────────── */}
+      {/* ── Sticky tabs ── */}
       <div className="sticky top-0 z-10 bg-slate-900 border-b border-slate-800">
         <div className="max-w-lg mx-auto flex">
-          {(['tabela', 'mecevi'] as ActiveTab[]).map((t) => (
+          {(['tabela', 'mecevi', 'dvoboji'] as ActiveTab[]).map((t) => (
             <button
               key={t}
               onClick={() => setActiveTab(t)}
@@ -152,7 +200,7 @@ export default function SharePage() {
                   : 'text-slate-400'
               }`}
             >
-              {t === 'tabela' ? 'Tabela' : 'Mečevi'}
+              {t === 'tabela' ? 'Tabela' : t === 'mecevi' ? 'Mečevi' : 'Dvoboji'}
             </button>
           ))}
         </div>
@@ -160,7 +208,7 @@ export default function SharePage() {
 
       <div className="max-w-lg mx-auto px-3 py-4">
 
-        {/* ── Skeleton ────────────────────────────────────────────────────── */}
+        {/* ── Skeleton ── */}
         {loading && !data && (
           <div className="space-y-2">
             {[...Array(8)].map((_, i) => (
@@ -169,16 +217,12 @@ export default function SharePage() {
           </div>
         )}
 
-        {/* ── Standings tab ───────────────────────────────────────────────── */}
+        {/* ── Standings tab ── */}
         {!loading && data && activeTab === 'tabela' && (
           <div className="rounded-2xl overflow-hidden shadow-2xl border border-orange-500">
-
-            {/* Column headers */}
             <div className="flex items-center bg-slate-800/90 px-3 sm:px-4 h-9 border-b border-slate-700/60">
               <div className="w-9 shrink-0" />
-              <div className="flex-1 min-w-0 text-[10px] font-semibold text-slate-500 uppercase tracking-widest">
-                Igrač
-              </div>
+              <div className="flex-1 min-w-0 text-[10px] font-semibold text-slate-500 uppercase tracking-widest">Igrač</div>
               <div className="flex shrink-0">
                 <span className="w-7 text-center text-[10px] font-semibold text-slate-500 uppercase tracking-wider">M</span>
                 <span className="w-7 text-center text-[10px] font-semibold text-green-500/80 uppercase tracking-wider">P</span>
@@ -199,7 +243,6 @@ export default function SharePage() {
                 s.position === 1 ? 'bg-yellow-400' :
                 s.position === 2 ? 'bg-slate-300' :
                 s.position === 3 ? 'bg-amber-600' : '';
-
               return (
                 <div
                   key={s.player?.id ?? idx}
@@ -207,27 +250,16 @@ export default function SharePage() {
                     idx % 2 === 0 ? 'bg-slate-800' : 'bg-slate-800/60'
                   }`}
                 >
-                  {/* Top-3 accent line */}
                   {s.position <= 3 && (
                     <div className={`absolute left-0 top-0 bottom-0 w-0.75 rounded-r-full ${accentColor}`} />
                   )}
-
-                  {/* Rank badge */}
                   <div className="w-9 shrink-0 flex justify-center">
                     <RankBadge pos={s.position} />
                   </div>
-
-                  {/* Player name + sets ratio */}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-white truncate leading-snug">
-                      {s.player?.fullName ?? '—'}
-                    </p>
-                    <p className="text-[10px] text-slate-500 tabular-nums mt-0.5 leading-none">
-                      {s.setsFor}:{s.setsAgainst}
-                    </p>
+                    <p className="text-sm font-semibold text-white truncate leading-snug">{s.player?.fullName ?? '—'}</p>
+                    <p className="text-[10px] text-slate-500 tabular-nums mt-0.5 leading-none">{s.setsFor}:{s.setsAgainst}</p>
                   </div>
-
-                  {/* Stats */}
                   <div className="flex shrink-0">
                     <span className="w-7 text-center text-sm text-slate-400 tabular-nums">{s.played}</span>
                     <span className="w-7 text-center text-sm text-green-400 tabular-nums font-semibold">{s.won}</span>
@@ -241,7 +273,7 @@ export default function SharePage() {
           </div>
         )}
 
-        {/* ── Matches tab ─────────────────────────────────────────────────── */}
+        {/* ── Matches tab ── */}
         {!loading && data && activeTab === 'mecevi' && (
           <div className="space-y-3">
             {data.groups.length === 0 && (
@@ -249,25 +281,19 @@ export default function SharePage() {
                 {data.isEuroleague ? 'Nema odigranih ligaških dana' : 'Nema generisanih mečeva'}
               </p>
             )}
-
             {data.groups.map((group) => {
               const isOpen = group.sessionStatus === 'open';
               const isExpanded = expandedGroups.has(group.label);
               const doneCount = group.matches.filter((m) => m.status === 'completed').length;
-
               return (
                 <div key={group.label} className="bg-slate-800 rounded-2xl overflow-hidden shadow-xl">
-
-                  {/* Group header — tappable */}
                   <button
                     onClick={() => toggleGroup(group.label)}
                     className="w-full px-4 py-3.5 flex items-center justify-between gap-3 active:bg-slate-700/40 transition-colors"
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <Calendar className="w-3.5 h-3.5 text-orange-400 shrink-0" />
-                      <span className="text-sm font-semibold text-slate-200 truncate">
-                        {groupLabel(group)}
-                      </span>
+                      <span className="text-sm font-semibold text-slate-200 truncate">{groupLabel(group)}</span>
                       {data.isEuroleague && isOpen && (
                         <span className="text-[10px] font-semibold text-green-400 bg-green-400/10 px-2 py-0.5 rounded-full shrink-0">
                           U toku
@@ -275,67 +301,44 @@ export default function SharePage() {
                       )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-xs text-slate-500 tabular-nums">
-                        {doneCount}/{group.matches.length}
-                      </span>
-                      <ChevronDown
-                        className={`w-4 h-4 text-slate-500 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
-                      />
+                      <span className="text-xs text-slate-500 tabular-nums">{doneCount}/{group.matches.length}</span>
+                      <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
                     </div>
                   </button>
-
-                  {/* Collapsible matches */}
                   {isExpanded && (
                     <div className="border-t border-slate-700">
-                  {group.matches.map((m) => {
-                    const isDone = m.status === 'completed';
-                    const homeWon = isDone && m.winnerId === m.homePlayer?.id;
-                    const awayWon = isDone && m.winnerId === m.awayPlayer?.id;
-
-                    return (
-                      <div key={m.id} className="px-3 sm:px-4 py-2.5 sm:py-3.5 border-b border-slate-700/40 last:border-0">
-                        <div className="flex items-center gap-2">
-
-                          {/* Home player */}
-                          <p className={`flex-1 text-sm text-right leading-tight truncate ${
-                            homeWon ? 'font-bold text-white' : 'text-slate-300'
-                          }`}>
-                            {m.homePlayer?.fullName ?? '—'}
-                          </p>
-
-                          {/* Score / status — fixed width so names get equal space */}
-                          <div className="shrink-0 w-14 sm:w-16 text-center">
-                            {isDone ? (
-                              <span className="text-sm font-bold text-orange-400 tabular-nums">
-                                {m.homeSets} : {m.awaySets}
-                              </span>
-                            ) : m.isPostponed ? (
-                              <span className="text-[10px] font-semibold text-yellow-400 bg-yellow-400/10 px-2 py-0.5 rounded-full whitespace-nowrap">
-                                Odložen
-                              </span>
-                            ) : (
-                              <span className="text-[11px] font-semibold text-slate-500">vs</span>
-                            )}
+                      {group.matches.map((m) => {
+                        const isDone = m.status === 'completed';
+                        const homeWon = isDone && m.winnerId === m.homePlayer?.id;
+                        const awayWon = isDone && m.winnerId === m.awayPlayer?.id;
+                        return (
+                          <div key={m.id} className="px-3 sm:px-4 py-2.5 sm:py-3.5 border-b border-slate-700/40 last:border-0">
+                            <div className="flex items-center gap-2">
+                              <p className={`flex-1 text-sm text-right leading-tight truncate ${homeWon ? 'font-bold text-white' : 'text-slate-300'}`}>
+                                {m.homePlayer?.fullName ?? '—'}
+                              </p>
+                              <div className="shrink-0 w-14 sm:w-16 text-center">
+                                {isDone ? (
+                                  <span className="text-sm font-bold text-orange-400 tabular-nums">{m.homeSets} : {m.awaySets}</span>
+                                ) : m.isPostponed ? (
+                                  <span className="text-[10px] font-semibold text-yellow-400 bg-yellow-400/10 px-2 py-0.5 rounded-full whitespace-nowrap">Odložen</span>
+                                ) : (
+                                  <span className="text-[11px] font-semibold text-slate-500">vs</span>
+                                )}
+                              </div>
+                              <p className={`flex-1 text-sm leading-tight truncate ${awayWon ? 'font-bold text-white' : 'text-slate-300'}`}>
+                                {m.awayPlayer?.fullName ?? '—'}
+                              </p>
+                              <div className="shrink-0 w-4 flex justify-center">
+                                {isDone
+                                  ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
+                                  : <Clock className="w-3.5 h-3.5 text-slate-700" />
+                                }
+                              </div>
+                            </div>
                           </div>
-
-                          {/* Away player */}
-                          <p className={`flex-1 text-sm leading-tight truncate ${
-                            awayWon ? 'font-bold text-white' : 'text-slate-300'
-                          }`}>
-                            {m.awayPlayer?.fullName ?? '—'}
-                          </p>
-
-                          {/* Status icon */}
-                          <div className="shrink-0 w-4 flex justify-center">
-                            {isDone
-                              ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
-                              : <Clock className="w-3.5 h-3.5 text-slate-700" />
-                            }
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -344,7 +347,126 @@ export default function SharePage() {
           </div>
         )}
 
-        {/* ── Footer ──────────────────────────────────────────────────────── */}
+        {/* ── Dvoboji tab ── */}
+        {!loading && data && activeTab === 'dvoboji' && (
+          <div className="space-y-4">
+
+            {dvobojiPlayers.length < 2 && (
+              <p className="text-center text-slate-500 text-sm py-10">Nema dovoljno igrača.</p>
+            )}
+
+            {dvobojiPlayers.length >= 2 && (
+              <>
+                {/* Player selector */}
+                <div>
+                  <label className="text-xs font-semibold uppercase tracking-wide block mb-1.5 text-slate-500">
+                    Izaberi igrača
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={dvobojiPlayerId || selectedPlayer?.id}
+                      onChange={e => { setDvobojiPlayerId(e.target.value); setExpandedPairs(new Set()); }}
+                      className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-xl px-3 py-2.5 pr-8 appearance-none focus:outline-none focus:border-orange-500"
+                    >
+                      {dvobojiPlayers.map(p => (
+                        <option key={p.id} value={p.id}>{p.fullName}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none text-slate-400" />
+                  </div>
+                </div>
+
+                {/* Stats bar */}
+                <div className="flex gap-4 px-4 py-3 rounded-xl bg-slate-800 border border-slate-700/50">
+                  {[
+                    { label: 'Završeno',  value: pairStats.completed,  color: 'text-emerald-400' },
+                    { label: 'Delimično', value: pairStats.partial,    color: 'text-amber-400'   },
+                    { label: 'Zakazano',  value: pairStats.upcoming,   color: 'text-indigo-400'  },
+                    { label: 'Nije',      value: pairStats.not_played, color: 'text-slate-500'   },
+                  ].map(s => (
+                    <div key={s.label} className="flex items-baseline gap-1">
+                      <span className={`text-sm font-bold tabular-nums ${s.color}`}>{s.value}</span>
+                      <span className="text-[10px] text-slate-500">{s.label}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Opponent rows */}
+                <div className="space-y-2">
+                  {dvobojiOpponents.map(({ opponent, between, completed, status }) => {
+                    const isExpanded = expandedPairs.has(opponent.id);
+
+                    let statusEl: React.ReactElement;
+                    if (status === 'completed')
+                      statusEl = <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 bg-emerald-400/15 text-emerald-400">✓ Završeno</span>;
+                    else if (status === 'partial')
+                      statusEl = <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 bg-amber-400/15 text-amber-400">{completed.length}/{expectedPerPair}</span>;
+                    else if (status === 'upcoming')
+                      statusEl = <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 bg-indigo-400/15 text-indigo-400">⏳ Zakazano</span>;
+                    else
+                      statusEl = <span className="text-[10px] text-slate-500 shrink-0">Nije</span>;
+
+                    const canExpand = between.length > 0;
+
+                    return (
+                      <div key={opponent.id} className="rounded-xl overflow-hidden bg-slate-800 border border-slate-700/50">
+                        {/* Row header */}
+                        <button
+                          onClick={() => canExpand && togglePair(opponent.id)}
+                          className={`w-full flex items-center gap-3 px-3 py-3 text-left transition-colors ${canExpand ? 'active:bg-slate-700/40' : 'cursor-default'}`}
+                        >
+                          {/* Initials avatar */}
+                          <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center shrink-0">
+                            <span className="text-xs font-bold text-slate-300">
+                              {opponent.fullName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                            </span>
+                          </div>
+                          <span className="flex-1 text-sm font-medium text-slate-200 truncate">{opponent.fullName}</span>
+                          {statusEl}
+                          {canExpand && (
+                            isExpanded
+                              ? <ChevronUp className="w-4 h-4 text-slate-500 shrink-0" />
+                              : <ChevronDown className="w-4 h-4 text-slate-500 shrink-0" />
+                          )}
+                        </button>
+
+                        {/* Inline expanded matches */}
+                        {isExpanded && between.length > 0 && (
+                          <div className="border-t border-slate-700/50 divide-y divide-slate-700/30">
+                            {between.map(m => {
+                              const isDone = m.status === 'completed';
+                              const homeIsSelected = m.homePlayer?.id === selectedPlayer?.id;
+                              const homeN = homeIsSelected ? selectedPlayer!.fullName : opponent.fullName;
+                              const awayN = homeIsSelected ? opponent.fullName : selectedPlayer!.fullName;
+                              const homeWon = isDone && m.homeSets > m.awaySets;
+                              const awayWon = isDone && m.awaySets > m.homeSets;
+
+                              return (
+                                <div key={m.id} className="px-3 py-2.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 bg-orange-500/15 text-orange-400">DOM</span>
+                                    <span className={`flex-1 text-xs truncate ${homeWon ? 'font-bold text-white' : 'text-slate-400'}`}>{homeN}</span>
+                                    <span className="shrink-0 text-sm font-bold tabular-nums text-slate-200 min-w-11 text-center">
+                                      {isDone ? `${m.homeSets} : ${m.awaySets}` : <span className="text-slate-600 text-xs">vs</span>}
+                                    </span>
+                                    <span className={`flex-1 text-xs truncate text-right ${awayWon ? 'font-bold text-white' : 'text-slate-400'}`}>{awayN}</span>
+                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 bg-indigo-500/15 text-indigo-400">GOS</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── Footer ── */}
         {lastUpdated && (
           <p className="text-center text-[11px] text-slate-600 mt-5 pb-2">
             Osveženo u {lastUpdated.toLocaleTimeString('sr-RS', { hour: '2-digit', minute: '2-digit' })}
