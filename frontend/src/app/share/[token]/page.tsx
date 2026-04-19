@@ -497,7 +497,6 @@ export default function SharePage() {
                         {isActive && (
                           <motion.div
                             layoutId="phase-pill"
-                            layoutDependency={activePhaseKey}
                             className="absolute inset-0 rounded-full bg-orange-500"
                             transition={{ type: 'spring', stiffness: 420, damping: 32 }}
                             style={{ boxShadow: '0 0 12px rgba(249,115,22,0.45)' }}
@@ -536,7 +535,6 @@ export default function SharePage() {
                         {isActive && (
                           <motion.div
                             layoutId="subtab-pill"
-                            layoutDependency={activeTab}
                             className="absolute inset-0 rounded-full bg-slate-600"
                             transition={{ type: 'spring', stiffness: 420, damping: 32 }}
                           />
