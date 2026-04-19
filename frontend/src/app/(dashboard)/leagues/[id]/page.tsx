@@ -4574,7 +4574,7 @@ export default function LeagueDetailPage() {
                           <span className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{homeN}</span>
                         </div>
                         <div className="shrink-0 text-center min-w-[52px]">
-                          {done ? <span className="font-mono font-bold text-base tabular-nums" style={{ color: 'var(--text-primary)' }}>{aScore} : {bScore}</span>
+                          {done ? <span className="font-mono font-bold text-base tabular-nums" style={{ color: 'var(--text-primary)' }}>{m.homeSets} : {m.awaySets}</span>
                                 : <span className="text-xs font-medium text-slate-500">vs</span>}
                         </div>
                         <div className="flex-1 flex items-center justify-end gap-2 min-w-0">
@@ -5053,7 +5053,7 @@ export default function LeagueDetailPage() {
                   <div className="shrink-0 text-center min-w-[52px]">
                     {done ? (
                       <span className="font-mono font-bold text-base tabular-nums" style={{ color: 'var(--text-primary)' }}>
-                        {aScore} : {bScore}
+                        {m.homeSets} : {m.awaySets}
                       </span>
                     ) : (
                       <span className="text-xs font-medium text-slate-500">vs</span>
