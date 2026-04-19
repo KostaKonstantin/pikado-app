@@ -332,6 +332,9 @@ export default function SharePage() {
       const res = await fetch(`${API_URL}/api/share/${token}`, { cache: 'no-store' });
       if (!res.ok) throw new Error('invalid');
       const d: ShareData = await res.json();
+      d.phases = d.phases ?? [];
+      d.standings = d.standings ?? [];
+      d.groups = d.groups ?? [];
       setData(d);
       setLastUpdated(new Date());
       setError('');
@@ -384,7 +387,7 @@ export default function SharePage() {
         .sort((a, b) => ({ not_played: 0, upcoming: 1, partial: 2, completed: 3 }[a.status] - { not_played: 0, upcoming: 1, partial: 2, completed: 3 }[b.status]))
     : [];
 
-  const activePhase = data?.phases.find(p => p.id === activePhaseKey);
+  const activePhase = data?.phases?.find(p => p.id === activePhaseKey);
 
   /* Dvoboji data for active phase */
   const phaseAllMatches = activePhase ? activePhase.groups.flatMap(g => g.matches) : [];
