@@ -182,9 +182,7 @@ function ShareModal({
   setCopied: (v: boolean) => void;
   onClose: () => void;
 }) {
-  const origin = typeof window !== 'undefined'
-    ? (process.env.NEXT_PUBLIC_APP_URL || window.location.origin)
-    : '';
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const shareUrl = shareToken ? `${origin}/share/${shareToken}` : null;
 
   useEffect(() => {
