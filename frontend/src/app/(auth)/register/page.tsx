@@ -4,7 +4,14 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { authApi } from '@/lib/api/auth.api';
 import { useAuthStore } from '@/store/auth.store';
-import { Mail, Lock, User, Building2, MapPin, Globe, ArrowRight, AlertCircle, Loader2 } from 'lucide-react';
+import { Mail, Lock, User, Building2, MapPin, Globe, ArrowRight, AlertCircle, Loader2, Eye, EyeOff, Check, X } from 'lucide-react';
+
+const passwordRules = [
+  { label: 'Minimum 8 karaktera', test: (p: string) => p.length >= 8 },
+  { label: 'Veliko slovo', test: (p: string) => /[A-Z]/.test(p) },
+  { label: 'Broj', test: (p: string) => /[0-9]/.test(p) },
+  { label: 'Specijalni karakter', test: (p: string) => /[^A-Za-z0-9]/.test(p) },
+];
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -19,10 +26,19 @@ export default function RegisterPage() {
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [passwordTouched, setPasswordTouched] = useState(false);
+
+  const passwordValid = passwordRules.every(r => r.test(form.password));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    if (!passwordValid) {
+      setPasswordTouched(true);
+      setError('Lozinka ne ispunjava sve uslove.');
+      return;
+    }
     setLoading(true);
     try {
       const res = await authApi.register(form);
@@ -74,10 +90,42 @@ export default function RegisterPage() {
           <label className="form-label">Lozinka *</label>
           <div className="relative">
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none" style={{ color: 'var(--text-secondary)' }} />
-            <input type="password" className="input-field" style={{ paddingLeft: '2.5rem' }}
-              placeholder="Minimum 6 karaktera" value={form.password} onChange={set('password')}
-              required minLength={6} autoComplete="new-password" />
+            <input
+              type={showPassword ? 'text' : 'password'}
+              className="input-field"
+              style={{ paddingLeft: '2.5rem', paddingRight: '2.75rem' }}
+              placeholder="Minimum 8 karaktera"
+              value={form.password}
+              onChange={e => { set('password')(e); setPasswordTouched(true); }}
+              required
+              autoComplete="new-password"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(v => !v)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 transition-colors"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
           </div>
+
+          {/* Password rules */}
+          {passwordTouched && (
+            <div className="mt-2 space-y-1">
+              {passwordRules.map(rule => {
+                const ok = rule.test(form.password);
+                return (
+                  <div key={rule.label} className="flex items-center gap-1.5 text-xs">
+                    {ok
+                      ? <Check className="w-3 h-3 text-emerald-400 shrink-0" />
+                      : <X className="w-3 h-3 text-red-400 shrink-0" />}
+                    <span style={{ color: ok ? '#4ade80' : '#f87171' }}>{rule.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Divider */}
