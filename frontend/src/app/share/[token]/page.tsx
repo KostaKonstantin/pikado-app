@@ -510,15 +510,15 @@ function GuidePanel({
   tabs: InfoTab[];
   activeTab: ActiveTab;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     try {
       const hidden = window.localStorage.getItem('pikado-share-guide-hidden');
-      setExpanded(hidden !== 'true');
+      setExpanded(hidden === 'false');
     } catch {
-      setExpanded(true);
+      setExpanded(false);
     } finally {
       setReady(true);
     }
