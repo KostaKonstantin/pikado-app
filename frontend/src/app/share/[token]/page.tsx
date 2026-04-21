@@ -115,10 +115,19 @@ function CountUp({ value, delay = 0 }: { value: number; delay?: number }) {
   return <>{display}</>;
 }
 
+type ZoneConfig = {
+  advanceUntil: number;   // positions 1..advanceUntil prolaze
+  barazUntil?: number;    // positions advanceUntil+1..barazUntil su baraž (opciono)
+  // ostalo = ispadanje
+  advanceLabel?: string;
+};
+
 function StandingsTable({
   standings,
+  zones,
 }: {
   standings: StandingRow[];
+  zones?: ZoneConfig;
 }) {
   return (
     <div className="rounded-2xl overflow-hidden shadow-2xl border border-orange-500">
@@ -139,32 +148,75 @@ function StandingsTable({
         </div>
       )}
       {standings.map((s, idx) => {
+        const rowDelay = idx * 0.05;
+        const legTotal = s.setsFor + s.setsAgainst;
+        const legPct = legTotal > 0 ? (s.setsFor / legTotal) * 100 : 0;
+        const rowTone = idx % 2 === 0 ? 'bg-slate-800' : 'bg-slate-800/60'
+        const inAdvance = zones ? s.position <= zones.advanceUntil : s.position <= 8;
+        const inBaraz = zones
+          ? (zones.barazUntil ? s.position > zones.advanceUntil && s.position <= zones.barazUntil : false)
+          : s.position >= 9 && s.position <= 20;
+
         const accentColor =
           s.position === 1 ? 'bg-yellow-400' :
           s.position === 2 ? 'bg-slate-300' :
-          s.position === 3 ? 'bg-amber-600' : '';
-        const rowDelay = idx * 0.05;
+          s.position === 3 ? 'bg-amber-600' :
+          inAdvance ? 'bg-orange-400/80' :
+          inBaraz ? 'bg-sky-400/75' :
+          'bg-rose-500/75';
+
+        const barazBoundary = zones ? zones.advanceUntil + 1 : 9;
+        const ispadanjeBoundary = zones?.barazUntil ? zones.barazUntil + 1 : (zones ? zones.advanceUntil + 1 : 21);
+        const zoneSeparator =
+          s.position === barazBoundary && inBaraz ? { label: 'Baraž', color: '#38bdf8', border: 'rgba(56,189,248,0.35)' } :
+          s.position === ispadanjeBoundary && !inAdvance && !inBaraz ? { label: 'Ispadanje', color: '#f43f5e', border: 'rgba(244,63,94,0.35)' } :
+          null;
+
         return (
+          <div key={s.player?.id ?? idx}>
+            {zoneSeparator && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 12px', borderTop: `1px solid ${zoneSeparator.border}`, background: 'rgba(15,23,42,0.6)' }}>
+                <div style={{ flex: 1, height: 1, background: zoneSeparator.border }} />
+                <span style={{ fontSize: 10, fontWeight: 700, color: zoneSeparator.color, letterSpacing: '0.12em', textTransform: 'uppercase', padding: '3px 0' }}>{zoneSeparator.label}</span>
+                <div style={{ flex: 1, height: 1, background: zoneSeparator.border }} />
+              </div>
+            )}
           <motion.div
-            key={s.player?.id ?? idx}
-            className={`relative flex items-center px-3 sm:px-4 py-3.5 border-b border-slate-700/25 last:border-0 ${
-              idx % 2 === 0 ? 'bg-slate-800' : 'bg-slate-800/60'
-            }`}
+            key={`row-${s.player?.id ?? idx}`}
+            className={`relative flex items-start px-3 sm:px-4 py-3 border-b border-slate-700/25 last:border-0 ${rowTone}`}
             initial={{ opacity: 0, x: -18 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.35, delay: rowDelay, ease: 'easeOut' }}
           >
-            {s.position <= 3 && (
-              <div className={`absolute left-0 top-0 bottom-0 w-0.75 rounded-r-full ${accentColor}`} />
-            )}
-            <div className="w-9 shrink-0 flex justify-center">
-              <RankBadge pos={s.position} />
+            <div className={`absolute left-0 top-0 bottom-0 w-0.75 rounded-r-full ${accentColor}`} />
+            <div className="flex-1 min-w-0 pr-2">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{
+                  flexShrink: 0, fontWeight: 800, fontSize: 11, fontVariantNumeric: 'tabular-nums',
+                  borderRadius: 999, padding: '2px 7px',
+                  color: s.position === 1 ? '#facc15' : s.position === 2 ? '#cbd5e1' : s.position === 3 ? '#d97706' : s.position <= 8 ? '#f97316' : s.position <= 20 ? '#38bdf8' : '#f43f5e',
+                  background: s.position === 1 ? 'rgba(250,204,21,0.12)' : s.position === 2 ? 'rgba(203,213,225,0.1)' : s.position === 3 ? 'rgba(217,119,6,0.12)' : s.position <= 8 ? 'rgba(249,115,22,0.1)' : s.position <= 20 ? 'rgba(56,189,248,0.1)' : 'rgba(244,63,94,0.1)',
+                  border: `1px solid ${s.position === 1 ? 'rgba(250,204,21,0.3)' : s.position === 2 ? 'rgba(203,213,225,0.25)' : s.position === 3 ? 'rgba(217,119,6,0.3)' : s.position <= 8 ? 'rgba(249,115,22,0.25)' : s.position <= 20 ? 'rgba(56,189,248,0.25)' : 'rgba(244,63,94,0.25)'}`,
+                  animation: s.position === 1 ? 'goldTextGlow 2.2s ease-in-out infinite' : s.position === 2 ? 'silverTextGlow 2.5s ease-in-out infinite' : s.position === 3 ? 'bronzeTextGlow 2.8s ease-in-out infinite' : undefined,
+                }}>#{s.position}</span>
+                <p className="text-[14px] font-semibold text-white truncate leading-snug">{s.player?.fullName ?? '—'}</p>
+              </div>
+              {legTotal > 0 ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, background: 'rgba(74,222,128,0.08)', borderRadius: 999, padding: '2px 6px' }}>
+                    <span style={{ color: '#4ade80', fontSize: 10, fontWeight: 700, fontVariantNumeric: 'tabular-nums', letterSpacing: '0.01em' }}>L+ {s.setsFor}</span>
+                  </span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, background: 'rgba(248,113,113,0.08)', borderRadius: 999, padding: '2px 6px' }}>
+                    <span style={{ color: '#f87171', fontSize: 10, fontWeight: 700, fontVariantNumeric: 'tabular-nums', letterSpacing: '0.01em' }}>L− {s.setsAgainst}</span>
+                  </span>
+                </div>
+              ) : (
+                <span style={{ display: 'inline-flex', background: 'rgba(100,116,139,0.12)', borderRadius: 999, padding: '2px 7px', marginTop: 4 }}>
+                  <span style={{ color: '#64748b', fontSize: 10, fontWeight: 600 }}>Bez meča</span>
+                </span>
+              )}
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-white truncate leading-snug">{s.player?.fullName ?? '—'}</p>
-              <p className="text-[10px] text-slate-500 tabular-nums mt-0.5 leading-none">{s.setsFor}:{s.setsAgainst}</p>
-            </div>
-            <div className="flex shrink-0">
+            <div className="flex shrink-0 pt-0.5">
               <span className="w-7 text-center text-sm text-slate-400 tabular-nums">{s.played}</span>
               <span className="w-7 text-center text-sm text-green-400 tabular-nums font-semibold">{s.won}</span>
               <span className="w-7 text-center text-sm text-yellow-400 tabular-nums font-semibold">{s.drawn}</span>
@@ -174,6 +226,7 @@ function StandingsTable({
               </span>
             </div>
           </motion.div>
+          </div>
         );
       })}
     </div>
@@ -976,6 +1029,18 @@ export default function SharePage() {
           0%, 100% { box-shadow: 0 0 8px 2px rgba(249,115,22,0.25), 0 0 20px 4px rgba(249,115,22,0.08); }
           50%       { box-shadow: 0 0 14px 4px rgba(249,115,22,0.55), 0 0 36px 8px rgba(249,115,22,0.18); }
         }
+        @keyframes goldTextGlow {
+          0%, 100% { text-shadow: 0 0 8px rgba(250,204,21,0.8), 0 0 20px rgba(250,204,21,0.5), 0 0 40px rgba(250,204,21,0.2); }
+          50%       { text-shadow: 0 0 14px rgba(250,204,21,1), 0 0 30px rgba(250,204,21,0.8), 0 0 60px rgba(250,204,21,0.4); }
+        }
+        @keyframes silverTextGlow {
+          0%, 100% { text-shadow: 0 0 8px rgba(203,213,225,0.7), 0 0 18px rgba(203,213,225,0.4), 0 0 35px rgba(203,213,225,0.15); }
+          50%       { text-shadow: 0 0 13px rgba(203,213,225,1), 0 0 28px rgba(203,213,225,0.7), 0 0 50px rgba(203,213,225,0.3); }
+        }
+        @keyframes bronzeTextGlow {
+          0%, 100% { text-shadow: 0 0 8px rgba(217,119,6,0.75), 0 0 18px rgba(217,119,6,0.45), 0 0 35px rgba(217,119,6,0.18); }
+          50%       { text-shadow: 0 0 13px rgba(217,119,6,1), 0 0 28px rgba(217,119,6,0.75), 0 0 55px rgba(217,119,6,0.35); }
+        }
         @keyframes emberFloat1 {
           0%   { transform: translateY(0px)   translateX(0px);  opacity: 0; }
           8%   { opacity: 0.9; }
@@ -1181,7 +1246,16 @@ export default function SharePage() {
               {activePhaseKey !== 'regular' && activePhase && (
                 <>
                   {activeTab === 'tabela' && activePhase.type === 'round_robin' && (
-                    <StandingsTable standings={activePhase.standings} />
+                    <StandingsTable
+                      standings={activePhase.standings}
+                      zones={
+                        /baraž|baraz/i.test(activePhase.name)
+                          ? { advanceUntil: 2 }
+                          : /top\s*10/i.test(activePhase.name)
+                            ? { advanceUntil: 4 }
+                            : undefined
+                      }
+                    />
                   )}
                   {activeTab === 'mecevi' && (
                     <MatchGroups
@@ -1209,7 +1283,7 @@ export default function SharePage() {
               {/* ── Regular season content ── */}
               {activePhaseKey === 'regular' && (
                 <>
-                  {activeTab === 'tabela' && <StandingsTable standings={data.standings} />}
+                  {activeTab === 'tabela' && <StandingsTable standings={data.standings} zones={{ advanceUntil: 8, barazUntil: 20 }} />}
                   {activeTab === 'mecevi' && (
                     <MatchGroups
                       groups={data.groups}
