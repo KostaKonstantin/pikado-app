@@ -142,18 +142,7 @@ function StandingsTable({
         const rowDelay = idx * 0.05;
         const legTotal = s.setsFor + s.setsAgainst;
         const legPct = legTotal > 0 ? (s.setsFor / legTotal) * 100 : 0;
-        const rowTone =
-          s.position === 1
-            ? 'bg-[linear-gradient(90deg,rgba(250,204,21,0.13),rgba(51,65,85,0.88)_22%,rgba(30,41,59,0.97))]'
-            : s.position === 2
-              ? 'bg-[linear-gradient(90deg,rgba(203,213,225,0.12),rgba(51,65,85,0.88)_22%,rgba(30,41,59,0.97))]'
-              : s.position === 3
-                ? 'bg-[linear-gradient(90deg,rgba(217,119,6,0.13),rgba(51,65,85,0.88)_22%,rgba(30,41,59,0.97))]'
-                : s.position <= 8
-                  ? 'bg-[linear-gradient(90deg,rgba(249,115,22,0.11),rgba(51,65,85,0.9)_20%,rgba(30,41,59,0.97))]'
-                  : s.position <= 20
-                    ? 'bg-[linear-gradient(90deg,rgba(56,189,248,0.11),rgba(30,41,59,0.92)_20%,rgba(15,23,42,0.98))]'
-                    : 'bg-[linear-gradient(90deg,rgba(244,63,94,0.14),rgba(30,41,59,0.94)_20%,rgba(15,23,42,0.99))]'
+        const rowTone = idx % 2 === 0 ? 'bg-slate-800' : 'bg-slate-800/60'
         const accentColor =
           s.position === 1 ? 'bg-yellow-400' :
           s.position === 2 ? 'bg-slate-300' :
