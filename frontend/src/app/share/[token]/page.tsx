@@ -62,7 +62,7 @@ function getPairStatusCounts(opponents: { status: string }[]) {
 }
 
 function formatLeagueMeta(format: string, mode: string) {
-  const formatLabel = format === 'home_away' ? 'Dvokruzni sistem' : 'Jednokruzni sistem';
+  const formatLabel = format === 'home_away' ? 'Dvokružni sistem' : 'Jednokružni sistem';
   const modeLabel = mode === 'euroleague'
     ? 'Evroliga faze'
     : mode === 'session'
@@ -854,9 +854,6 @@ export default function SharePage() {
     : [];
 
   const headerPlayers = activePhaseKey !== 'regular' && activePhase ? phasePlayers : dvobojiPlayers;
-  const headerGroups = activePhaseKey !== 'regular' && activePhase ? activePhase.groups : data?.groups ?? [];
-  const headerMatches = headerGroups.flatMap((g) => g.matches);
-  const headerCompleted = headerMatches.filter((m) => m.status === 'completed').length;
   const { formatLabel, modeLabel } = formatLeagueMeta(data?.league.format ?? 'single', data?.league.mode ?? 'round');
   const contentKey = `${activePhaseKey}-${activeTab}`;
 
@@ -1097,7 +1094,6 @@ export default function SharePage() {
             <div className="w-full flex flex-wrap items-center gap-1.5 pt-1">
               {[
                 `${headerPlayers.length} igrača`,
-                `${headerCompleted}/${headerMatches.length} mečeva`,
                 formatLabel,
                 modeLabel,
               ].map((meta) => (
