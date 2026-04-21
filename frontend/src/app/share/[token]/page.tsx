@@ -115,10 +115,19 @@ function CountUp({ value, delay = 0 }: { value: number; delay?: number }) {
   return <>{display}</>;
 }
 
+type ZoneConfig = {
+  advanceUntil: number;   // positions 1..advanceUntil prolaze
+  barazUntil?: number;    // positions advanceUntil+1..barazUntil su baraž (opciono)
+  // ostalo = ispadanje
+  advanceLabel?: string;
+};
+
 function StandingsTable({
   standings,
+  zones,
 }: {
   standings: StandingRow[];
+  zones?: ZoneConfig;
 }) {
   return (
     <div className="rounded-2xl overflow-hidden shadow-2xl border border-orange-500">
@@ -143,16 +152,24 @@ function StandingsTable({
         const legTotal = s.setsFor + s.setsAgainst;
         const legPct = legTotal > 0 ? (s.setsFor / legTotal) * 100 : 0;
         const rowTone = idx % 2 === 0 ? 'bg-slate-800' : 'bg-slate-800/60'
+        const inAdvance = zones ? s.position <= zones.advanceUntil : s.position <= 8;
+        const inBaraz = zones
+          ? (zones.barazUntil ? s.position > zones.advanceUntil && s.position <= zones.barazUntil : false)
+          : s.position >= 9 && s.position <= 20;
+
         const accentColor =
           s.position === 1 ? 'bg-yellow-400' :
           s.position === 2 ? 'bg-slate-300' :
           s.position === 3 ? 'bg-amber-600' :
-          s.position <= 8 ? 'bg-orange-400/80' :
-          s.position <= 20 ? 'bg-sky-400/75' :
+          inAdvance ? 'bg-orange-400/80' :
+          inBaraz ? 'bg-sky-400/75' :
           'bg-rose-500/75';
+
+        const barazBoundary = zones ? zones.advanceUntil + 1 : 9;
+        const ispadanjeBoundary = zones?.barazUntil ? zones.barazUntil + 1 : (zones ? zones.advanceUntil + 1 : 21);
         const zoneSeparator =
-          s.position === 9 ? { label: 'Baraž', color: '#38bdf8', border: 'rgba(56,189,248,0.35)' } :
-          s.position === 21 ? { label: 'Ispadanje', color: '#f43f5e', border: 'rgba(244,63,94,0.35)' } :
+          s.position === barazBoundary && inBaraz ? { label: 'Baraž', color: '#38bdf8', border: 'rgba(56,189,248,0.35)' } :
+          s.position === ispadanjeBoundary && !inAdvance && !inBaraz ? { label: 'Ispadanje', color: '#f43f5e', border: 'rgba(244,63,94,0.35)' } :
           null;
 
         return (
@@ -1229,7 +1246,16 @@ export default function SharePage() {
               {activePhaseKey !== 'regular' && activePhase && (
                 <>
                   {activeTab === 'tabela' && activePhase.type === 'round_robin' && (
-                    <StandingsTable standings={activePhase.standings} />
+                    <StandingsTable
+                      standings={activePhase.standings}
+                      zones={
+                        /baraž|baraz/i.test(activePhase.name)
+                          ? { advanceUntil: 2 }
+                          : /top\s*10/i.test(activePhase.name)
+                            ? { advanceUntil: 4 }
+                            : undefined
+                      }
+                    />
                   )}
                   {activeTab === 'mecevi' && (
                     <MatchGroups
@@ -1257,7 +1283,7 @@ export default function SharePage() {
               {/* ── Regular season content ── */}
               {activePhaseKey === 'regular' && (
                 <>
-                  {activeTab === 'tabela' && <StandingsTable standings={data.standings} />}
+                  {activeTab === 'tabela' && <StandingsTable standings={data.standings} zones={{ advanceUntil: 8, barazUntil: 20 }} />}
                   {activeTab === 'mecevi' && (
                     <MatchGroups
                       groups={data.groups}
