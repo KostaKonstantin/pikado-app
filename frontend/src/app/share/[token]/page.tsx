@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
-import { RefreshCw, Trophy, Calendar, CheckCircle2, Clock, ChevronDown, ChevronUp } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { RefreshCw, Trophy, Calendar, CheckCircle2, Clock, ChevronDown, ChevronUp, Users } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3099').replace(/\/$/, '');
 
@@ -45,6 +45,31 @@ type ShareData = {
 };
 
 type ActiveTab = 'tabela' | 'mecevi' | 'dvoboji';
+type InfoTab = { id: ActiveTab; label: string };
+type SegmentedItem = {
+  id: string;
+  label: string;
+  live?: boolean;
+};
+
+function getPairStatusCounts(opponents: { status: string }[]) {
+  return {
+    completed: opponents.filter((o) => o.status === 'completed').length,
+    partial: opponents.filter((o) => o.status === 'partial').length,
+    upcoming: opponents.filter((o) => o.status === 'upcoming').length,
+    notPlayed: opponents.filter((o) => o.status === 'not_played').length,
+  };
+}
+
+function formatLeagueMeta(format: string, mode: string) {
+  const formatLabel = format === 'home_away' ? 'Dvokruzni sistem' : 'Jednokruzni sistem';
+  const modeLabel = mode === 'euroleague'
+    ? 'Evroliga faze'
+    : mode === 'session'
+      ? 'Ligaški dani'
+      : 'Klasična kola';
+  return { formatLabel, modeLabel };
+}
 
 /* ── Sub-components ─────────────────────────────────────────────────── */
 function RankBadge({ pos }: { pos: number }) {
@@ -70,7 +95,10 @@ function RankBadge({ pos }: { pos: number }) {
 function CountUp({ value, delay = 0 }: { value: number; delay?: number }) {
   const [display, setDisplay] = useState(0);
   useEffect(() => {
-    if (value === 0) { setDisplay(0); return; }
+    if (value === 0) {
+      const frame = requestAnimationFrame(() => setDisplay(0));
+      return () => cancelAnimationFrame(frame);
+    }
     const timeout = setTimeout(() => {
       const startTime = performance.now();
       const duration = 750;
@@ -87,7 +115,11 @@ function CountUp({ value, delay = 0 }: { value: number; delay?: number }) {
   return <>{display}</>;
 }
 
-function StandingsTable({ standings }: { standings: StandingRow[] }) {
+function StandingsTable({
+  standings,
+}: {
+  standings: StandingRow[];
+}) {
   return (
     <div className="rounded-2xl overflow-hidden shadow-2xl border border-orange-500">
       <div className="flex items-center bg-slate-800/90 px-3 sm:px-4 h-9 border-b border-slate-700/60">
@@ -156,6 +188,9 @@ function MatchGroups({
   toggleGroup: (n: number) => void;
   groupLabel: (g: Group) => string;
 }) {
+  const [groupPlayerFilter, setGroupPlayerFilter] = useState<Record<number, string>>({});
+  const [groupStatusFilter, setGroupStatusFilter] = useState<Record<number, 'all' | 'completed' | 'pending'>>({});
+
   return (
     <div className="space-y-3">
       {groups.length === 0 && (
@@ -165,6 +200,24 @@ function MatchGroups({
         const isOpen = group.sessionStatus === 'open';
         const isExpanded = expandedGroups.has(group.label);
         const doneCount = group.matches.filter(m => m.status === 'completed').length;
+        const playersInGroup = Array.from(
+          new Map(
+            group.matches.flatMap((m) => [
+              m.homePlayer ? [[m.homePlayer.id, m.homePlayer.fullName]] : [],
+              m.awayPlayer ? [[m.awayPlayer.id, m.awayPlayer.fullName]] : [],
+            ].flat()),
+          ).entries(),
+        ).map(([id, fullName]) => ({ id, fullName }));
+        const selectedGroupPlayerId = groupPlayerFilter[group.label] ?? '';
+        const selectedStatus = groupStatusFilter[group.label] ?? 'all';
+        const filteredMatches = group.matches.filter((m) => {
+          const statusOk = selectedStatus === 'all'
+            ? true
+            : selectedStatus === 'completed'
+              ? m.status === 'completed'
+              : m.status !== 'completed';
+          return statusOk;
+        });
         return (
           <div key={group.label} className="bg-slate-800 rounded-2xl overflow-hidden shadow-xl">
             <button
@@ -185,14 +238,78 @@ function MatchGroups({
             </button>
             {isExpanded && (
               <div className="border-t border-slate-700">
-                {group.matches.map(m => {
+                <div className="px-3 sm:px-4 py-3 border-b border-slate-700/40 bg-slate-900/55">
+                  <div className="flex flex-col gap-2.5">
+                    <div className="relative">
+                      <select
+                        value={selectedGroupPlayerId}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setGroupPlayerFilter((prev) => ({ ...prev, [group.label]: value }));
+                        }}
+                        className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-xl px-3 py-2.5 pr-8 appearance-none focus:outline-none focus:border-orange-500"
+                      >
+                        <option value="">Svi igrači ovog dana</option>
+                        {playersInGroup.map((player) => (
+                          <option key={player.id} value={player.id}>
+                            {player.fullName}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none text-slate-400" />
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { id: 'all' as const, label: 'Svi' },
+                        { id: 'completed' as const, label: 'Završeni' },
+                        { id: 'pending' as const, label: 'Na čekanju' },
+                      ].map((filter) => {
+                        const active = selectedStatus === filter.id;
+                        return (
+                          <button
+                            key={filter.id}
+                            type="button"
+                            onClick={() => setGroupStatusFilter((prev) => ({ ...prev, [group.label]: filter.id }))}
+                            className={`rounded-full px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+                              active
+                                ? 'bg-orange-500/15 text-orange-300 border border-orange-500/30'
+                                : 'bg-slate-800 text-slate-400 border border-slate-700'
+                            }`}
+                          >
+                            {filter.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {filteredMatches.length === 0 && (
+                  <div className="px-4 py-6 text-center text-sm text-slate-500">
+                    Nema mečeva za izabrani filter.
+                  </div>
+                )}
+
+                {filteredMatches.map(m => {
                   const isDone = m.status === 'completed';
                   const homeWon = isDone && m.winnerId === m.homePlayer?.id;
                   const awayWon = isDone && m.winnerId === m.awayPlayer?.id;
+                  const hasSelectedGroupPlayer = selectedGroupPlayerId && (m.homePlayer?.id === selectedGroupPlayerId || m.awayPlayer?.id === selectedGroupPlayerId);
+                  const playerSelectedHome = m.homePlayer?.id === selectedGroupPlayerId;
+                  const playerSelectedAway = m.awayPlayer?.id === selectedGroupPlayerId;
+                  const shouldDim = !!selectedGroupPlayerId && !hasSelectedGroupPlayer;
                   return (
-                    <div key={m.id} className="px-3 sm:px-4 py-2.5 sm:py-3.5 border-b border-slate-700/40 last:border-0">
+                    <div
+                      key={m.id}
+                      className={`px-3 sm:px-4 py-2.5 sm:py-3.5 border-b border-slate-700/40 last:border-0 transition-all ${
+                        hasSelectedGroupPlayer
+                          ? 'bg-orange-500/10 ring-1 ring-inset ring-orange-400/30'
+                          : ''
+                      } ${shouldDim ? 'opacity-45' : 'opacity-100'}`}
+                    >
                       <div className="flex items-center gap-2">
-                        <p className={`flex-1 text-sm text-right leading-tight truncate ${homeWon ? 'font-bold text-white' : 'text-slate-300'}`}>
+                        <p className={`flex-1 text-sm text-right leading-tight truncate ${homeWon ? 'font-bold text-white' : 'text-slate-300'} ${playerSelectedHome ? 'text-orange-300' : ''}`}>
                           {m.homePlayer?.fullName ?? '—'}
                         </p>
                         <div className="shrink-0 w-14 sm:w-16 text-center">
@@ -204,7 +321,7 @@ function MatchGroups({
                             <span className="text-[11px] font-semibold text-slate-500">vs</span>
                           )}
                         </div>
-                        <p className={`flex-1 text-sm leading-tight truncate ${awayWon ? 'font-bold text-white' : 'text-slate-300'}`}>
+                        <p className={`flex-1 text-sm leading-tight truncate ${awayWon ? 'font-bold text-white' : 'text-slate-300'} ${playerSelectedAway ? 'text-orange-300' : ''}`}>
                           {m.awayPlayer?.fullName ?? '—'}
                         </p>
                         <div className="shrink-0 w-4 flex justify-center">
@@ -238,17 +355,64 @@ function DvobojiTab({
   togglePair: (id: string) => void;
   selectedPlayer: Player | undefined;
 }) {
-  const pairStats = {
-    completed:  opponents.filter(o => o.status === 'completed').length,
-    partial:    opponents.filter(o => o.status === 'partial').length,
-    upcoming:   opponents.filter(o => o.status === 'upcoming').length,
-    not_played: opponents.filter(o => o.status === 'not_played').length,
-  };
+  const pairStats = getPairStatusCounts(opponents);
+  const mostPlayed = [...opponents]
+    .sort((a, b) => b.between.length - a.between.length)[0];
+  const nextTargets = opponents.filter((o) => o.status === 'partial' || o.status === 'not_played').length;
 
   if (players.length < 2) return <p className="text-center text-slate-500 text-sm py-10">Nema dovoljno igrača.</p>;
 
   return (
     <div className="space-y-3">
+      <div className="rounded-2xl border border-slate-700/60 bg-slate-800/80 p-4 shadow-xl">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-orange-400/80 mb-1">
+              Dvoboji pregled
+            </p>
+            <h3 className="text-sm font-semibold text-white">
+              {selectedPlayer ? selectedPlayer.fullName : 'Izaberi igrača'}
+            </h3>
+            <p className="text-xs text-slate-400 mt-1">
+              Ovde vidiš kako stoji protiv svakog protivnika, ko je već odigran i ko još čeka.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 mt-4 sm:grid-cols-4">
+          {[
+            { label: 'Završeno', value: pairStats.completed, tone: 'text-emerald-400 bg-emerald-500/10' },
+            { label: 'Delimično', value: pairStats.partial, tone: 'text-amber-400 bg-amber-500/10' },
+            { label: 'Zakazano', value: pairStats.upcoming, tone: 'text-indigo-400 bg-indigo-500/10' },
+            { label: 'Nije igrano', value: pairStats.notPlayed, tone: 'text-slate-300 bg-slate-700/70' },
+          ].map((stat) => (
+            <div key={stat.label} className={`rounded-xl px-3 py-2.5 ${stat.tone}`}>
+              <div className="text-lg font-bold tabular-nums">{stat.value}</div>
+              <div className="text-[11px] font-medium opacity-90">{stat.label}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid gap-2 mt-3 sm:grid-cols-2">
+          <div className="rounded-xl border border-slate-700/60 bg-slate-900/55 px-3 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Najviše puta protiv</p>
+            <p className="text-sm font-semibold text-white mt-1">
+              {mostPlayed?.between.length ? mostPlayed.opponent.fullName : 'Još nema duela'}
+            </p>
+            <p className="text-xs text-slate-400 mt-1">
+              {mostPlayed?.between.length ? `${mostPlayed.between.length} međusobnih susreta` : 'Kad krenu mečevi, ovde ćeš odmah videti najčešćeg protivnika.'}
+            </p>
+          </div>
+          <div className="rounded-xl border border-slate-700/60 bg-slate-900/55 px-3 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sledeći izazovi</p>
+            <p className="text-sm font-semibold text-white mt-1">{nextTargets}</p>
+            <p className="text-xs text-slate-400 mt-1">
+              {nextTargets > 0 ? 'Toliko protivnika još čeka potpuni rasplet ili prvi duel.' : 'Sve je odigrano ili je raspored potpuno zatvoren.'}
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div className="relative">
         <select
           value={selectedPlayerId}
@@ -274,8 +438,8 @@ function DvobojiTab({
         ))}
       </div>
 
-      <div className="space-y-2">
-        {opponents.map(({ opponent, between, completed, status }) => {
+        <div className="space-y-2">
+          {opponents.map(({ opponent, between, completed, status }) => {
           const isExpanded = expandedPairs.has(opponent.id);
           const canExpand = between.length > 0;
 
@@ -339,6 +503,195 @@ function DvobojiTab({
   );
 }
 
+function GuidePanel({
+  tabs,
+  activeTab,
+}: {
+  tabs: InfoTab[];
+  activeTab: ActiveTab;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    try {
+      const hidden = window.localStorage.getItem('pikado-share-guide-hidden');
+      setExpanded(hidden !== 'true');
+    } catch {
+      setExpanded(true);
+    } finally {
+      setReady(true);
+    }
+  }, []);
+
+  const toggleExpanded = () => {
+    setExpanded((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem('pikado-share-guide-hidden', String(!next));
+      } catch {
+        // Ignore storage failures; the panel can still toggle locally.
+      }
+      return next;
+    });
+  };
+
+  const guideItems = [
+    {
+      id: 'tabela' as ActiveTab,
+      label: 'Tabela',
+      icon: Trophy,
+      accent: 'from-amber-500/20 via-orange-500/10 to-transparent',
+      iconWrap: 'bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/25',
+      text: 'Ovde vidiš trenutni poredak igrača. Prikazani su pozicija, odigrani mečevi, pobede, remiji, porazi i broj bodova.',
+      helper: 'Ako želiš brz pregled ko trenutno vodi, kreni odavde.',
+    },
+    {
+      id: 'mecevi' as ActiveTab,
+      label: 'Mečevi',
+      icon: Calendar,
+      accent: 'from-sky-500/20 via-indigo-500/10 to-transparent',
+      iconWrap: 'bg-sky-500/15 text-sky-400 ring-1 ring-sky-500/25',
+      text: 'Ovde su raspored i rezultati mečeva po kolima ili ligaškim danima. Možeš lako da vidiš šta je završeno, a šta tek sledi.',
+      helper: 'Korisno kada pratiš tok lige meč po meč.',
+    },
+    {
+      id: 'dvoboji' as ActiveTab,
+      label: 'Dvoboji',
+      icon: Users,
+      accent: 'from-emerald-500/20 via-teal-500/10 to-transparent',
+      iconWrap: 'bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/25',
+      text: 'Ovde gledaš direktan odnos dva igrača, jedan protiv drugog. Ako želiš da proveriš s kim si igrao, samo u padajućem meniju izaberi svoje ime, pa niže u listi pogledaj protiv koga si već igrao, kakvi su bili rezultati i ko ti još nije došao na red.',
+      helper: 'Dvoboj = međusobni duel dva konkretna igrača, pregledan na jednom mestu.',
+    },
+  ].filter((item) => tabs.some((tab) => tab.id === item.id));
+
+  if (!ready || guideItems.length === 0) return null;
+
+  return (
+    <motion.section
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: 'easeOut' }}
+      className="mb-4 rounded-[24px] border border-orange-500/20 bg-slate-900/70 shadow-[0_20px_60px_rgba(0,0,0,0.22)] backdrop-blur-sm overflow-hidden"
+    >
+      <div className="relative px-4 sm:px-5 py-4 sm:py-5">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(249,115,22,0.16),transparent_42%)] pointer-events-none" />
+
+        <div className="relative flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-orange-400/80 mb-1">
+              Kratki vodič
+            </p>
+            <h2 className="text-base sm:text-lg font-bold text-white">
+              Kako da čitaš ovu stranicu?
+            </h2>
+            <p className="text-sm text-slate-400 mt-1 max-w-2xl">
+              Sve je na jednom mestu: pregled tabele, raspored mečeva i međusobni dueli igrača.
+              Ako ti je neki naziv bio nejasan, ovde je kratko objašnjenje za svaki deo.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={toggleExpanded}
+            className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-slate-700/80 bg-slate-800/80 px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:border-orange-500/30 hover:text-white"
+          >
+            {expanded ? 'Sakrij' : 'Prikaži'}
+            {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+
+        {expanded && (
+          <div className="relative mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {guideItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <div
+                  key={item.id}
+                  className={`relative overflow-hidden rounded-2xl border px-4 py-4 transition-all duration-200 ${
+                    isActive
+                      ? 'border-orange-500/40 bg-slate-800/95 shadow-[0_0_0_1px_rgba(249,115,22,0.16)]'
+                      : 'border-slate-700/70 bg-slate-800/70'
+                  }`}
+                >
+                  <div className={`absolute inset-0 bg-gradient-to-br ${item.accent} pointer-events-none`} />
+
+                  <div className="relative">
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div className={`inline-flex h-10 w-10 items-center justify-center rounded-2xl ${item.iconWrap}`}>
+                        <Icon className="w-[18px] h-[18px]" />
+                      </div>
+                      {isActive && (
+                        <span className="rounded-full bg-orange-500/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-orange-300">
+                          Otvoreno
+                        </span>
+                      )}
+                    </div>
+
+                    <h3 className="text-sm font-semibold text-white">{item.label}</h3>
+                    <p className="text-sm leading-6 text-slate-300 mt-2">{item.text}</p>
+                    <p className="text-xs leading-5 text-slate-400 mt-3">{item.helper}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </motion.section>
+  );
+}
+
+function SegmentedControl({
+  items,
+  activeId,
+  onChange,
+  activeClassName,
+}: {
+  items: SegmentedItem[];
+  activeId: string;
+  onChange: (id: string) => void;
+  activeClassName: string;
+}) {
+  return (
+    <div className="flex rounded-full bg-slate-800/70 p-1">
+      {items.map((item) => {
+        const isActive = activeId === item.id;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => onChange(item.id)}
+            className="relative flex flex-1 items-center justify-center gap-1.5 rounded-full py-1.5 text-xs font-semibold whitespace-nowrap"
+          >
+            <AnimatePresence mode="wait" initial={false}>
+              {isActive && (
+                <motion.span
+                  key={`${item.id}-pill`}
+                  className={`absolute inset-0 rounded-full ${activeClassName}`}
+                  initial={{ opacity: 0.55, scale: 0.9, y: 1 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.96, y: -1 }}
+                  transition={{
+                    duration: 0.22,
+                    ease: [0.22, 1, 0.36, 1],
+                  }}
+                />
+              )}
+            </AnimatePresence>
+            <span className={`relative z-10 transition-colors duration-150 ${isActive ? 'text-white' : 'text-slate-400'}`}>
+              {item.label}
+            </span>
+            {item.live && <span className="relative z-10 w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ── Main page ──────────────────────────────────────────────────────── */
 export default function SharePage() {
   const { token } = useParams<{ token: string }>();
@@ -358,10 +711,16 @@ export default function SharePage() {
   const PULL_THRESHOLD = 70;
 
   const toggleGroup = (label: number) => setExpandedGroups(prev => {
-    const next = new Set(prev); next.has(label) ? next.delete(label) : next.add(label); return next;
+    const next = new Set(prev);
+    if (next.has(label)) next.delete(label);
+    else next.add(label);
+    return next;
   });
   const togglePair = (id: string) => setExpandedPairs(prev => {
-    const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next;
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
   });
 
   const load = useCallback(async () => {
@@ -378,7 +737,11 @@ export default function SharePage() {
       setError('');
       if (d.groups.length > 0) setExpandedGroups(new Set([d.groups[d.groups.length - 1].label]));
       if (d.standings.length > 0 && d.standings[0].player) setDvobojiPlayerId(d.standings[0].player.id);
-      if (d.groups.length === 0 && d.phases.length > 0) setActivePhaseKey(d.phases[0].id);
+      if (d.phases.length > 0) {
+        const livePhase = d.phases.find((phase) => phase.status === 'active');
+        setActivePhaseKey(livePhase?.id ?? d.phases[0].id);
+        if (livePhase?.type === 'knockout') setActiveTab('mecevi');
+      }
     } catch {
       setError('Link nije validan ili liga više ne postoji.');
     } finally {
@@ -432,7 +795,9 @@ export default function SharePage() {
   const allMatches = data ? data.groups.flatMap(g => g.matches) : [];
   const expectedPerPair = data?.league.format === 'home_away' ? 2 : 1;
   const dvobojiPlayers = data ? data.standings.map(s => s.player).filter(Boolean) as Player[] : [];
-  const selectedPlayer = dvobojiPlayers.find(p => p.id === dvobojiPlayerId) ?? dvobojiPlayers[0];
+  const selectedPlayer = dvobojiPlayerId
+    ? dvobojiPlayers.find((p) => p.id === dvobojiPlayerId)
+    : undefined;
 
   const dvobojiOpponents = selectedPlayer
     ? dvobojiPlayers
@@ -454,11 +819,21 @@ export default function SharePage() {
     : [];
 
   const activePhase = data?.phases?.find(p => p.id === activePhaseKey);
+  const isKnockout = activePhaseKey !== 'regular' && activePhase?.type === 'knockout';
+  const visibleTabs: InfoTab[] = isKnockout
+    ? [{ id: 'mecevi', label: 'Mečevi' }]
+    : [
+        { id: 'tabela', label: 'Tabela' },
+        { id: 'mecevi', label: 'Mečevi' },
+        { id: 'dvoboji', label: 'Dvoboji' },
+      ];
 
   /* Dvoboji data for active phase */
   const phaseAllMatches = activePhase ? activePhase.groups.flatMap(g => g.matches) : [];
   const phasePlayers = activePhase ? activePhase.standings.map(s => s.player).filter(Boolean) as Player[] : [];
-  const phaseSelectedPlayer = phasePlayers.find(p => p.id === dvobojiPlayerId) ?? phasePlayers[0];
+  const phaseSelectedPlayer = dvobojiPlayerId
+    ? phasePlayers.find((p) => p.id === dvobojiPlayerId)
+    : undefined;
   const phaseOpponents = phaseSelectedPlayer
     ? phasePlayers
         .filter(p => p.id !== phaseSelectedPlayer.id)
@@ -477,6 +852,13 @@ export default function SharePage() {
         })
         .sort((a, b) => ({ not_played: 0, upcoming: 1, partial: 2, completed: 3 }[a.status] - { not_played: 0, upcoming: 1, partial: 2, completed: 3 }[b.status]))
     : [];
+
+  const headerPlayers = activePhaseKey !== 'regular' && activePhase ? phasePlayers : dvobojiPlayers;
+  const headerGroups = activePhaseKey !== 'regular' && activePhase ? activePhase.groups : data?.groups ?? [];
+  const headerMatches = headerGroups.flatMap((g) => g.matches);
+  const headerCompleted = headerMatches.filter((m) => m.status === 'completed').length;
+  const { formatLabel, modeLabel } = formatLeagueMeta(data?.league.format ?? 'single', data?.league.mode ?? 'round');
+  const contentKey = `${activePhaseKey}-${activeTab}`;
 
   return (
     <div
@@ -656,7 +1038,7 @@ export default function SharePage() {
         ))}
 
         <motion.div
-          className="relative max-w-lg lg:max-w-5xl mx-auto flex items-center gap-3 lg:gap-5"
+          className="relative max-w-lg lg:max-w-5xl mx-auto flex flex-wrap items-center gap-3 lg:gap-5"
           initial={{ opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.35 }}
@@ -678,17 +1060,19 @@ export default function SharePage() {
               {loading && !data ? '...' : (data?.league?.name ?? 'Nepoznata liga')}
             </h1>
             {data && (
-              <div className="flex items-center gap-1.5 mt-0.5">
-                {data.league.status === 'active' && (
-                  <span className="relative flex w-1.5 h-1.5 shrink-0">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-60" />
-                    <span className="relative inline-flex rounded-full w-1.5 h-1.5 bg-green-400" />
+              <>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  {data.league.status === 'active' && (
+                    <span className="relative flex w-1.5 h-1.5 shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-60" />
+                      <span className="relative inline-flex rounded-full w-1.5 h-1.5 bg-green-400" />
+                    </span>
+                  )}
+                  <span className="text-[11px] font-semibold" style={{ color: data.league.status === 'active' ? '#4ade80' : '#94a3b8' }}>
+                    {data.league.status === 'active' ? 'U toku' : data.league.status === 'completed' ? 'Završena' : 'Čeka početak'}
                   </span>
-                )}
-                <span className="text-[11px] font-semibold" style={{ color: data.league.status === 'active' ? '#4ade80' : '#94a3b8' }}>
-                  {data.league.status === 'active' ? 'U toku' : data.league.status === 'completed' ? 'Završena' : 'Čeka početak'}
-                </span>
-              </div>
+                </div>
+              </>
             )}
           </div>
           <motion.button
@@ -708,6 +1092,21 @@ export default function SharePage() {
               <RefreshCw className="w-4 h-4 text-orange-400" />
             </motion.span>
           </motion.button>
+
+          {data && (
+            <div className="w-full flex flex-wrap items-center gap-1.5 pt-1">
+              {[
+                `${headerPlayers.length} igrača`,
+                `${headerCompleted}/${headerMatches.length} mečeva`,
+                formatLabel,
+                modeLabel,
+              ].map((meta) => (
+                <span key={meta} className="rounded-full border border-slate-700/70 bg-slate-800/65 px-2.5 py-1 text-[10px] font-medium text-slate-300">
+                  {meta}
+                </span>
+              ))}
+            </div>
+          )}
         </motion.div>
       </div>
 
@@ -717,77 +1116,43 @@ export default function SharePage() {
 
           {/* Phase tabs — samo ako postoje faze */}
           {data && data.phases.length > 0 && (() => {
-            const phaseList = [
+            const phaseList: SegmentedItem[] = [
               ...(data.groups.length > 0 && data.phases.length === 0 ? [{ id: 'regular', name: 'Regularna', status: '' }] : []),
               ...data.phases,
-            ];
+            ].map((phase) => ({
+              id: phase.id,
+              label: phase.name,
+              live: phase.id !== 'regular' && (phase as PhaseData).status === 'active',
+            }));
             return (
               <div className="px-3 pt-2.5 pb-0">
-                <div className="flex bg-slate-800/70 rounded-full p-1">
-                  {phaseList.map(phase => {
-                    const isActive = activePhaseKey === phase.id;
-                    const isLive = phase.id !== 'regular' && (phase as PhaseData).status === 'active';
-                    return (
-                      <button
-                        key={phase.id}
-                        onClick={() => { setActivePhaseKey(phase.id); setActiveTab('tabela'); setExpandedGroups(new Set()); setExpandedPairs(new Set()); setDvobojiPlayerId(''); }}
-                        className="relative flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-semibold whitespace-nowrap"
-                      >
-                        {isActive && (
-                          <motion.div
-                            layoutId="phase-pill"
-                            className="absolute inset-0 rounded-full bg-orange-500"
-                            transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                            style={{ boxShadow: '0 0 12px rgba(249,115,22,0.45)' }}
-                          />
-                        )}
-                        <span className={`relative z-10 transition-colors duration-150 ${isActive ? 'text-white' : 'text-slate-400'}`}>
-                          {phase.name}
-                        </span>
-                        {isLive && <span className="relative z-10 w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />}
-                      </button>
-                    );
-                  })}
-                </div>
+                <SegmentedControl
+                  items={phaseList}
+                  activeId={activePhaseKey}
+                  onChange={(phaseId) => {
+                    const nextPhase = data.phases.find((phase) => phase.id === phaseId);
+                    setActivePhaseKey(phaseId);
+                    setActiveTab(nextPhase?.type === 'knockout' ? 'mecevi' : 'tabela');
+                    setExpandedGroups(new Set());
+                    setExpandedPairs(new Set());
+                    setDvobojiPlayerId('');
+                  }}
+                  activeClassName="bg-orange-500 text-white shadow-[0_0_12px_rgba(249,115,22,0.45)]"
+                />
               </div>
             );
           })()}
 
           {/* Sub-tabs */}
           {(() => {
-            const isKnockout = activePhaseKey !== 'regular' && activePhase?.type === 'knockout';
-            const tabs = isKnockout
-              ? [{ id: 'mecevi' as ActiveTab, label: 'Mečevi' }]
-              : [
-                  { id: 'tabela' as ActiveTab, label: 'Tabela' },
-                  { id: 'mecevi' as ActiveTab, label: 'Mečevi' },
-                  { id: 'dvoboji' as ActiveTab, label: 'Dvoboji' },
-                ];
             return (
               <div className="px-3 py-2.5">
-                <div className="relative flex bg-slate-800/70 rounded-full p-1">
-                  {tabs.map(t => {
-                    const isActive = activeTab === t.id;
-                    return (
-                      <button
-                        key={t.id}
-                        onClick={() => setActiveTab(t.id)}
-                        className="relative flex-1 flex items-center justify-center py-1.5 text-xs font-semibold whitespace-nowrap"
-                      >
-                        {isActive && (
-                          <motion.div
-                            layoutId="subtab-pill"
-                            className="absolute inset-0 rounded-full bg-slate-600"
-                            transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                          />
-                        )}
-                        <span className={`relative z-10 transition-colors duration-150 ${isActive ? 'text-white' : 'text-slate-400'}`}>
-                          {t.label}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+                <SegmentedControl
+                  items={visibleTabs}
+                  activeId={activeTab}
+                  onChange={(tabId) => setActiveTab(tabId as ActiveTab)}
+                  activeClassName="bg-slate-600 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
+                />
               </div>
             );
           })()}
@@ -803,23 +1168,77 @@ export default function SharePage() {
           </div>
         )}
 
-        {/* ── Phase content ── */}
-        {!loading && data && activePhaseKey !== 'regular' && activePhase && (
-          <>
-            {activeTab === 'tabela' && activePhase.type === 'round_robin' && <StandingsTable standings={activePhase.standings} />}
-            {activeTab === 'mecevi' && <MatchGroups groups={activePhase.groups} expandedGroups={expandedGroups} toggleGroup={toggleGroup} groupLabel={g => activePhase.type === 'knockout' ? `Mečevi` : data.isEuroleague ? `Ligaški Dan ${g.label}` : `Kolo ${g.label}`} />}
-            {activeTab === 'dvoboji' && activePhase.type === 'round_robin' && <DvobojiTab players={phasePlayers} opponents={phaseOpponents} selectedPlayerId={dvobojiPlayerId || phaseSelectedPlayer?.id || ''} expectedPerPair={expectedPerPair} onPlayerChange={id => { setDvobojiPlayerId(id); setExpandedPairs(new Set()); }} expandedPairs={expandedPairs} togglePair={togglePair} selectedPlayer={phaseSelectedPlayer} />}
-          </>
+        {!loading && data && (
+          <GuidePanel tabs={visibleTabs} activeTab={activeTab} />
         )}
 
-        {/* ── Regular season content ── */}
-        {!loading && data && activePhaseKey === 'regular' && (
-          <>
-            {activeTab === 'tabela' && <StandingsTable standings={data.standings} />}
-            {activeTab === 'mecevi' && <MatchGroups groups={data.groups} expandedGroups={expandedGroups} toggleGroup={toggleGroup} groupLabel={groupLabel} />}
-            {activeTab === 'dvoboji' && <DvobojiTab players={dvobojiPlayers} opponents={dvobojiOpponents} selectedPlayerId={dvobojiPlayerId || selectedPlayer?.id || ''} expectedPerPair={expectedPerPair} onPlayerChange={id => { setDvobojiPlayerId(id); setExpandedPairs(new Set()); }} expandedPairs={expandedPairs} togglePair={togglePair} selectedPlayer={selectedPlayer} />}
-          </>
-        )}
+        <AnimatePresence mode="wait" initial={false}>
+          {!loading && data && (
+            <motion.div
+              key={contentKey}
+              initial={{ opacity: 0, y: 16, filter: 'blur(6px)' }}
+              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, y: -10, filter: 'blur(4px)' }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            >
+              {/* ── Phase content ── */}
+              {activePhaseKey !== 'regular' && activePhase && (
+                <>
+                  {activeTab === 'tabela' && activePhase.type === 'round_robin' && (
+                    <StandingsTable standings={activePhase.standings} />
+                  )}
+                  {activeTab === 'mecevi' && (
+                    <MatchGroups
+                      groups={activePhase.groups}
+                      expandedGroups={expandedGroups}
+                      toggleGroup={toggleGroup}
+                      groupLabel={(g) => activePhase.type === 'knockout' ? `Mečevi` : data.isEuroleague ? `Ligaški Dan ${g.label}` : `Kolo ${g.label}`}
+                    />
+                  )}
+                  {activeTab === 'dvoboji' && activePhase.type === 'round_robin' && (
+                    <DvobojiTab
+                      players={phasePlayers}
+                      opponents={phaseOpponents}
+                      selectedPlayerId={dvobojiPlayerId || phaseSelectedPlayer?.id || ''}
+                      expectedPerPair={expectedPerPair}
+                      onPlayerChange={(id) => { setDvobojiPlayerId(id); setExpandedPairs(new Set()); }}
+                      expandedPairs={expandedPairs}
+                      togglePair={togglePair}
+                      selectedPlayer={phaseSelectedPlayer}
+                    />
+                  )}
+                </>
+              )}
+
+              {/* ── Regular season content ── */}
+              {activePhaseKey === 'regular' && (
+                <>
+                  {activeTab === 'tabela' && <StandingsTable standings={data.standings} />}
+                  {activeTab === 'mecevi' && (
+                    <MatchGroups
+                      groups={data.groups}
+                      expandedGroups={expandedGroups}
+                      toggleGroup={toggleGroup}
+                      groupLabel={groupLabel}
+                    />
+                  )}
+                  {activeTab === 'dvoboji' && (
+                    <DvobojiTab
+                      players={dvobojiPlayers}
+                      opponents={dvobojiOpponents}
+                      selectedPlayerId={dvobojiPlayerId || selectedPlayer?.id || ''}
+                      expectedPerPair={expectedPerPair}
+                      onPlayerChange={(id) => { setDvobojiPlayerId(id); setExpandedPairs(new Set()); }}
+                      expandedPairs={expandedPairs}
+                      togglePair={togglePair}
+                      selectedPlayer={selectedPlayer}
+                    />
+                  )}
+                </>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {lastUpdated && (
           <p className="text-center text-[11px] text-slate-600 mt-5 pb-2">
