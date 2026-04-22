@@ -130,7 +130,7 @@ function StandingsTable({
   zones?: ZoneConfig;
 }) {
   return (
-    <div className="rounded-2xl overflow-hidden shadow-2xl border border-orange-500">
+    <div className="rounded-2xl overflow-hidden shadow-2xl border border-slate-700/70">
       <div className="flex items-center bg-slate-800/90 px-3 sm:px-4 h-9 border-b border-slate-700/60">
         <div className="w-9 shrink-0" />
         <div className="flex-1 min-w-0 text-[10px] font-semibold text-slate-500 uppercase tracking-widest">Igrač</div>
@@ -150,20 +150,41 @@ function StandingsTable({
       {standings.map((s, idx) => {
         const rowDelay = idx * 0.05;
         const legTotal = s.setsFor + s.setsAgainst;
-        const legPct = legTotal > 0 ? (s.setsFor / legTotal) * 100 : 0;
         const rowTone = idx % 2 === 0 ? 'bg-slate-800' : 'bg-slate-800/60'
         const inAdvance = zones ? s.position <= zones.advanceUntil : s.position <= 8;
         const inBaraz = zones
           ? (zones.barazUntil ? s.position > zones.advanceUntil && s.position <= zones.barazUntil : false)
           : s.position >= 9 && s.position <= 20;
 
-        const accentColor =
-          s.position === 1 ? 'bg-yellow-400' :
-          s.position === 2 ? 'bg-slate-300' :
-          s.position === 3 ? 'bg-amber-600' :
-          inAdvance ? 'bg-orange-400/80' :
-          inBaraz ? 'bg-sky-400/75' :
-          'bg-rose-500/75';
+        const zoneColor = inAdvance
+          ? '#f8b84e'
+          : inBaraz
+            ? '#38bdf8'
+            : '#f43f5e';
+        const zoneRail = inAdvance
+          ? 'bg-amber-300/85'
+          : inBaraz
+            ? 'bg-sky-400/80'
+            : 'bg-rose-500/80';
+        const badgeColor =
+          s.position === 1 ? '#facc15' :
+          s.position === 2 ? '#cbd5e1' :
+          s.position === 3 ? '#d97706' :
+          zoneColor;
+        const badgeBackground =
+          s.position === 1 ? 'rgba(250,204,21,0.12)' :
+          s.position === 2 ? 'rgba(203,213,225,0.1)' :
+          s.position === 3 ? 'rgba(217,119,6,0.12)' :
+          inAdvance ? 'rgba(248,184,78,0.12)' :
+          inBaraz ? 'rgba(56,189,248,0.1)' :
+          'rgba(244,63,94,0.1)';
+        const badgeBorder =
+          s.position === 1 ? 'rgba(250,204,21,0.3)' :
+          s.position === 2 ? 'rgba(203,213,225,0.25)' :
+          s.position === 3 ? 'rgba(217,119,6,0.3)' :
+          inAdvance ? 'rgba(248,184,78,0.28)' :
+          inBaraz ? 'rgba(56,189,248,0.25)' :
+          'rgba(244,63,94,0.25)';
 
         const barazBoundary = zones ? zones.advanceUntil + 1 : 9;
         const ispadanjeBoundary = zones?.barazUntil ? zones.barazUntil + 1 : (zones ? zones.advanceUntil + 1 : 21);
@@ -188,15 +209,16 @@ function StandingsTable({
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.35, delay: rowDelay, ease: 'easeOut' }}
           >
-            <div className={`absolute left-0 top-0 bottom-0 w-0.75 rounded-r-full ${accentColor}`} />
+            <div className={`absolute left-0 top-0 bottom-0 w-[3px] rounded-r-full ${zoneRail}`} />
+            <div className={`absolute right-0 top-0 bottom-0 w-[3px] rounded-l-full ${zoneRail}`} />
             <div className="flex-1 min-w-0 pr-2">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{
                   flexShrink: 0, fontWeight: 800, fontSize: 11, fontVariantNumeric: 'tabular-nums',
                   borderRadius: 999, padding: '2px 7px',
-                  color: s.position === 1 ? '#facc15' : s.position === 2 ? '#cbd5e1' : s.position === 3 ? '#d97706' : s.position <= 8 ? '#f97316' : s.position <= 20 ? '#38bdf8' : '#f43f5e',
-                  background: s.position === 1 ? 'rgba(250,204,21,0.12)' : s.position === 2 ? 'rgba(203,213,225,0.1)' : s.position === 3 ? 'rgba(217,119,6,0.12)' : s.position <= 8 ? 'rgba(249,115,22,0.1)' : s.position <= 20 ? 'rgba(56,189,248,0.1)' : 'rgba(244,63,94,0.1)',
-                  border: `1px solid ${s.position === 1 ? 'rgba(250,204,21,0.3)' : s.position === 2 ? 'rgba(203,213,225,0.25)' : s.position === 3 ? 'rgba(217,119,6,0.3)' : s.position <= 8 ? 'rgba(249,115,22,0.25)' : s.position <= 20 ? 'rgba(56,189,248,0.25)' : 'rgba(244,63,94,0.25)'}`,
+                  color: badgeColor,
+                  background: badgeBackground,
+                  border: `1px solid ${badgeBorder}`,
                   animation: s.position === 1 ? 'goldTextGlow 2.2s ease-in-out infinite' : s.position === 2 ? 'silverTextGlow 2.5s ease-in-out infinite' : s.position === 3 ? 'bronzeTextGlow 2.8s ease-in-out infinite' : undefined,
                 }}>#{s.position}</span>
                 <p className="text-[14px] font-semibold text-white truncate leading-snug">{s.player?.fullName ?? '—'}</p>
