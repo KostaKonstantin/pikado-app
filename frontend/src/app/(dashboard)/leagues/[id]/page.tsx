@@ -609,16 +609,19 @@ export default function LeagueDetailPage() {
     setManualSaving(true);
     try {
       const added = await leaguesApi.addManualMatch(club.id, id, manualMatchSession.id, manualHome, manualAway);
+      const refreshAll = async () => {
+        await load();
+        if (activePhaseView) await loadPhaseData(activePhaseView);
+      };
       if (manualBuildMode) {
-        // Stay in modal — reset pickers, append to running list
         setManualAddedMatches((prev) => [...prev, added]);
         setManualHome('');
         setManualAway('');
         setManualCheck(null);
-        load(); // refresh page data in background (no await)
+        refreshAll();
       } else {
         closeManualMatch();
-        await load();
+        await refreshAll();
       }
     } catch (e: any) {
       alert(e?.response?.data?.message ?? 'Greška pri dodavanju meča');
@@ -2441,36 +2444,44 @@ export default function LeagueDetailPage() {
           {/* ── Scrollable body ── */}
           <div className="space-y-4 overflow-y-auto overscroll-contain" style={{ maxHeight: 'min(60vh, 500px)' }}>
 
-            {/* Player selectors */}
-            <div>
-              <label className="text-xs text-slate-400 mb-1.5 block font-medium">Domaćin</label>
-              <PlayerCombobox
-                value={manualHome}
-                onChange={(pid) => { setManualHome(pid); setManualCheck(null); }}
-                players={lPlayers}
-                excludeId={manualAway}
-                placeholder="— Pretraži domaćina —"
-              />
-            </div>
-
-            <div className="flex items-center justify-center">
-              <div className="flex items-center gap-2 text-slate-600 text-xs">
-                <div className="h-px w-12 bg-slate-700" />
-                <ArrowLeftRight className="w-3.5 h-3.5" />
-                <div className="h-px w-12 bg-slate-700" />
-              </div>
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-400 mb-1.5 block font-medium">Gost</label>
-              <PlayerCombobox
-                value={manualAway}
-                onChange={(pid) => { setManualAway(pid); setManualCheck(null); }}
-                players={lPlayers}
-                excludeId={manualHome}
-                placeholder="— Pretraži gosta —"
-              />
-            </div>
+            {/* Player selectors — filtered to present players only */}
+            {(() => {
+              const presentIds: string[] = manualMatchSession?.presentPlayerIds ?? [];
+              const manualPlayers = presentIds.length > 0
+                ? sessionModalPlayers.filter((lp: any) => presentIds.includes(lp.playerId))
+                : sessionModalPlayers;
+              return (
+                <>
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1.5 block font-medium">Domaćin</label>
+                    <PlayerCombobox
+                      value={manualHome}
+                      onChange={(pid) => { setManualHome(pid); setManualCheck(null); }}
+                      players={manualPlayers}
+                      excludeId={manualAway}
+                      placeholder="— Pretraži domaćina —"
+                    />
+                  </div>
+                  <div className="flex items-center justify-center">
+                    <div className="flex items-center gap-2 text-slate-600 text-xs">
+                      <div className="h-px w-12 bg-slate-700" />
+                      <ArrowLeftRight className="w-3.5 h-3.5" />
+                      <div className="h-px w-12 bg-slate-700" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1.5 block font-medium">Gost</label>
+                    <PlayerCombobox
+                      value={manualAway}
+                      onChange={(pid) => { setManualAway(pid); setManualCheck(null); }}
+                      players={manualPlayers}
+                      excludeId={manualHome}
+                      placeholder="— Pretraži gosta —"
+                    />
+                  </div>
+                </>
+              );
+            })()}
 
             {/* Validation feedback */}
             {(manualChecking || manualCheck) && (
@@ -4219,6 +4230,16 @@ export default function LeagueDetailPage() {
                                 );
                               })}
                             </div>
+                            {canEdit && (
+                              <div className="px-4 py-3" style={{ borderTop: '1px solid rgba(249,115,22,0.08)' }}>
+                                <button
+                                  onClick={() => openManualMatch(activeSession)}
+                                  className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-700/60 transition-colors font-medium w-full justify-center border border-dashed border-slate-700 hover:border-slate-500"
+                                >
+                                  <Plus className="w-3.5 h-3.5" /> Dodaj Meč Ručno
+                                </button>
+                              </div>
+                            )}
                           </>
                         ) : (
                           <div className="px-4 py-6 text-center text-xs text-slate-500">
