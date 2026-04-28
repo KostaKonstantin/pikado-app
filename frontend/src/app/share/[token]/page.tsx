@@ -894,6 +894,10 @@ export default function SharePage() {
     : [];
 
   const activePhase = data?.phases?.find(p => p.id === activePhaseKey);
+  const regularMatchGroups = data?.isEuroleague ? [...data.groups].reverse() : data?.groups ?? [];
+  const activePhaseMatchGroups = activePhase && data?.isEuroleague && activePhase.type !== 'knockout'
+    ? [...activePhase.groups].reverse()
+    : activePhase?.groups ?? [];
   const isKnockout = activePhaseKey !== 'regular' && activePhase?.type === 'knockout';
   const visibleTabs: InfoTab[] = isKnockout
     ? [{ id: 'mecevi', label: 'Mečevi' }]
@@ -1281,7 +1285,7 @@ export default function SharePage() {
                   )}
                   {activeTab === 'mecevi' && (
                     <MatchGroups
-                      groups={activePhase.groups}
+                      groups={activePhaseMatchGroups}
                       expandedGroups={expandedGroups}
                       toggleGroup={toggleGroup}
                       groupLabel={(g) => activePhase.type === 'knockout' ? `Mečevi` : data.isEuroleague ? `Ligaški Dan ${g.label}` : `Kolo ${g.label}`}
@@ -1308,7 +1312,7 @@ export default function SharePage() {
                   {activeTab === 'tabela' && <StandingsTable standings={data.standings} zones={{ advanceUntil: 8, barazUntil: 20 }} />}
                   {activeTab === 'mecevi' && (
                     <MatchGroups
-                      groups={data.groups}
+                      groups={regularMatchGroups}
                       expandedGroups={expandedGroups}
                       toggleGroup={toggleGroup}
                       groupLabel={groupLabel}
