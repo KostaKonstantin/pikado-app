@@ -11,6 +11,7 @@ async function bootstrap() {
     origin: process.env.CORS_ORIGINS?.split(',') || [
       'http://localhost:3000',
       'http://localhost:3002',
+      'https://pikado-app-ia3c.vercel.app',
     ],
     credentials: true,
   });
