@@ -1,8 +1,9 @@
 'use client';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
-import { RefreshCw, Trophy, Calendar, CheckCircle2, Clock, ChevronDown, ChevronUp, Users } from 'lucide-react';
+import { RefreshCw, Trophy, Calendar, CheckCircle2, Clock, ChevronDown, ChevronUp, Users, Copy, Check, QrCode, Share2, HelpCircle, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
+import QRCode from 'react-qr-code';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3099').replace(/\/$/, '');
 
@@ -51,15 +52,7 @@ type SegmentedItem = {
   label: string;
   live?: boolean;
 };
-
-function getPairStatusCounts(opponents: { status: string }[]) {
-  return {
-    completed: opponents.filter((o) => o.status === 'completed').length,
-    partial: opponents.filter((o) => o.status === 'partial').length,
-    upcoming: opponents.filter((o) => o.status === 'upcoming').length,
-    notPlayed: opponents.filter((o) => o.status === 'not_played').length,
-  };
-}
+type RankSnapshot = Record<string, Record<string, number>>;
 
 function formatLeagueMeta(format: string, mode: string) {
   const formatLabel = format === 'home_away' ? 'Dvokružni sistem' : 'Jednokružni sistem';
@@ -69,6 +62,46 @@ function formatLeagueMeta(format: string, mode: string) {
       ? 'Ligaški dani'
       : 'Klasična kola';
   return { formatLabel, modeLabel };
+}
+
+function buildRankSnapshot(data: ShareData): RankSnapshot {
+  const snapshot: RankSnapshot = {};
+  const addTable = (key: string, standings: StandingRow[]) => {
+    snapshot[key] = standings.reduce<Record<string, number>>((acc, row) => {
+      if (row.player) acc[row.player.id] = row.position;
+      return acc;
+    }, {});
+  };
+
+  addTable('regular', data.standings);
+  data.phases.forEach((phase) => addTable(phase.id, phase.standings));
+  return snapshot;
+}
+
+function readRankSnapshot(token: string): RankSnapshot {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(`pikado-share-rank-snapshot:${token}`);
+    return raw ? JSON.parse(raw) as RankSnapshot : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeRankSnapshot(token: string, snapshot: RankSnapshot) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(`pikado-share-rank-snapshot:${token}`, JSON.stringify(snapshot));
+  } catch {
+    // Trend indicators are best-effort; the table should still render if storage is unavailable.
+  }
+}
+
+function getShareSummary(data: ShareData) {
+  const leader = data.standings[0]?.player?.fullName ?? 'Pikado liga';
+  const leaderPoints = data.standings[0]?.points ?? 0;
+
+  return { leader, leaderPoints };
 }
 
 /* ── Sub-components ─────────────────────────────────────────────────── */
@@ -115,6 +148,26 @@ function CountUp({ value, delay = 0 }: { value: number; delay?: number }) {
   return <>{display}</>;
 }
 
+function RankTrend({ currentRank, previousRank }: { currentRank: number; previousRank?: number }) {
+  const delta = previousRank ? previousRank - currentRank : 0;
+  const label = delta > 0 ? `↑${delta}` : delta < 0 ? `↓${Math.abs(delta)}` : '—';
+  const className = delta > 0
+    ? 'text-green-400 bg-green-400/10 border-green-400/20'
+    : delta < 0
+      ? 'text-red-400 bg-red-400/10 border-red-400/20'
+      : 'text-slate-500 bg-slate-700/30 border-slate-600/30';
+
+  return (
+    <span
+      className={`inline-flex h-5 w-8 items-center justify-center rounded-full border text-[10px] font-bold tabular-nums leading-none ${className}`}
+      aria-label={delta > 0 ? `Napredovao ${delta}` : delta < 0 ? `Pao ${Math.abs(delta)}` : 'Bez promene'}
+      title={delta > 0 ? `+${delta} pozicija` : delta < 0 ? `-${Math.abs(delta)} pozicija` : 'Bez promene'}
+    >
+      {label}
+    </span>
+  );
+}
+
 type ZoneConfig = {
   advanceUntil: number;   // positions 1..advanceUntil prolaze
   barazUntil?: number;    // positions advanceUntil+1..barazUntil su baraž (opciono)
@@ -125,9 +178,19 @@ type ZoneConfig = {
 function StandingsTable({
   standings,
   zones,
+  highlightedPositions = [1],
+  highlightMode = 'medal',
+  highlightLabel,
+  tableTone = 'zoned',
+  previousRanks = {},
 }: {
   standings: StandingRow[];
   zones?: ZoneConfig;
+  highlightedPositions?: number[];
+  highlightMode?: 'medal' | 'qualified';
+  highlightLabel?: string;
+  tableTone?: 'zoned' | 'regular' | 'baraz' | 'top10';
+  previousRanks?: Record<string, number>;
 }) {
   return (
     <div className="rounded-2xl overflow-hidden shadow-2xl border border-slate-700/70">
@@ -155,40 +218,114 @@ function StandingsTable({
         const inBaraz = zones
           ? (zones.barazUntil ? s.position > zones.advanceUntil && s.position <= zones.barazUntil : false)
           : s.position >= 9 && s.position <= 20;
+        const rowSectionTone =
+          tableTone === 'baraz' ? (inAdvance ? 'advance' : 'relegation') :
+          tableTone === 'top10' ? (inAdvance ? 'advance' : 'relegation') :
+          inAdvance ? 'advance' :
+          inBaraz ? 'baraz' :
+          'relegation';
 
-        const zoneColor = inAdvance
+        const isHighlighted = highlightedPositions.includes(s.position);
+        const highlightTone = isHighlighted
+          ? highlightMode === 'qualified'
+            ? 'qualified'
+            : s.position === 1
+            ? 'gold'
+            : s.position === 2
+              ? 'silver'
+              : s.position === 3
+                ? 'bronze'
+                : 'amber'
+          : null;
+        const highlightStyle =
+          highlightTone === 'gold'
+            ? {
+                background: 'rgba(250,204,21,0.08)',
+                boxShadow: 'inset 0 0 0 1px rgba(250,204,21,0.28)',
+              }
+            : highlightTone === 'silver'
+              ? {
+                  background: 'rgba(203,213,225,0.07)',
+                  boxShadow: 'inset 0 0 0 1px rgba(203,213,225,0.24)',
+                }
+              : highlightTone === 'bronze'
+                ? {
+                    background: 'rgba(217,119,6,0.08)',
+                    boxShadow: 'inset 0 0 0 1px rgba(217,119,6,0.26)',
+                  }
+                : highlightTone === 'amber'
+                  ? {
+                      background: 'rgba(248,184,78,0.08)',
+                      boxShadow: 'inset 0 0 0 1px rgba(248,184,78,0.24)',
+                    }
+                  : highlightTone === 'qualified'
+                    ? {
+                        background: 'rgba(248,184,78,0.07)',
+                        boxShadow: 'inset 0 0 0 1px rgba(248,184,78,0.22)',
+                      }
+                  : undefined;
+        const zoneStyle =
+          rowSectionTone === 'advance'
+            ? {
+                background: 'rgba(248,184,78,0.045)',
+                boxShadow: 'inset 0 0 0 1px rgba(248,184,78,0.12)',
+              }
+            : rowSectionTone === 'baraz'
+              ? {
+                  background: 'rgba(56,189,248,0.075)',
+                  boxShadow: 'inset 0 0 0 1px rgba(56,189,248,0.24)',
+                }
+              : {
+                  background: 'rgba(244,63,94,0.07)',
+                  boxShadow: 'inset 0 0 0 1px rgba(244,63,94,0.22)',
+                };
+
+        const rowStyle = highlightStyle ?? zoneStyle;
+        const zoneColor = rowSectionTone === 'advance'
           ? '#f8b84e'
-          : inBaraz
+          : rowSectionTone === 'baraz'
             ? '#38bdf8'
             : '#f43f5e';
-        const zoneRail = inAdvance
+        const zoneRail = rowSectionTone === 'advance'
           ? 'bg-amber-300/85'
-          : inBaraz
+          : rowSectionTone === 'baraz'
             ? 'bg-sky-400/80'
             : 'bg-rose-500/80';
         const badgeColor =
-          s.position === 1 ? '#facc15' :
-          s.position === 2 ? '#cbd5e1' :
-          s.position === 3 ? '#d97706' :
+          highlightTone === 'gold' ? '#facc15' :
+          highlightTone === 'silver' ? '#e2e8f0' :
+          highlightTone === 'bronze' ? '#f59e0b' :
+          highlightTone === 'amber' ? '#f8b84e' :
+          highlightTone === 'qualified' ? '#f8b84e' :
           zoneColor;
         const badgeBackground =
-          s.position === 1 ? 'rgba(250,204,21,0.12)' :
-          s.position === 2 ? 'rgba(203,213,225,0.1)' :
-          s.position === 3 ? 'rgba(217,119,6,0.12)' :
+          highlightTone === 'gold' ? 'rgba(250,204,21,0.14)' :
+          highlightTone === 'silver' ? 'rgba(203,213,225,0.13)' :
+          highlightTone === 'bronze' ? 'rgba(217,119,6,0.14)' :
+          highlightTone === 'amber' ? 'rgba(248,184,78,0.13)' :
+          highlightTone === 'qualified' ? 'rgba(248,184,78,0.12)' :
           inAdvance ? 'rgba(248,184,78,0.12)' :
           inBaraz ? 'rgba(56,189,248,0.1)' :
           'rgba(244,63,94,0.1)';
         const badgeBorder =
-          s.position === 1 ? 'rgba(250,204,21,0.3)' :
-          s.position === 2 ? 'rgba(203,213,225,0.25)' :
-          s.position === 3 ? 'rgba(217,119,6,0.3)' :
+          highlightTone === 'gold' ? 'rgba(250,204,21,0.38)' :
+          highlightTone === 'silver' ? 'rgba(203,213,225,0.34)' :
+          highlightTone === 'bronze' ? 'rgba(217,119,6,0.36)' :
+          highlightTone === 'amber' ? 'rgba(248,184,78,0.34)' :
+          highlightTone === 'qualified' ? 'rgba(248,184,78,0.32)' :
           inAdvance ? 'rgba(248,184,78,0.28)' :
           inBaraz ? 'rgba(56,189,248,0.25)' :
           'rgba(244,63,94,0.25)';
 
         const barazBoundary = zones ? zones.advanceUntil + 1 : 9;
         const ispadanjeBoundary = zones?.barazUntil ? zones.barazUntil + 1 : (zones ? zones.advanceUntil + 1 : 21);
+        const topAdvanceLabel =
+          tableTone === 'zoned' || tableTone === 'regular' ? 'Top 8' :
+          tableTone === 'baraz' ? 'Top 2' :
+          tableTone === 'top10' ? 'Top 4' :
+          null;
         const zoneSeparator =
+          topAdvanceLabel && s.position === 1 && inAdvance ? { label: topAdvanceLabel, color: '#f8b84e', border: 'rgba(248,184,78,0.35)' } :
           s.position === barazBoundary && inBaraz ? { label: 'Baraž', color: '#38bdf8', border: 'rgba(56,189,248,0.35)' } :
           s.position === ispadanjeBoundary && !inAdvance && !inBaraz ? { label: 'Ispadanje', color: '#f43f5e', border: 'rgba(244,63,94,0.35)' } :
           null;
@@ -205,6 +342,7 @@ function StandingsTable({
           <motion.div
             key={`row-${s.player?.id ?? idx}`}
             className={`relative flex items-start px-3 sm:px-4 py-3 border-b border-slate-700/25 last:border-0 ${rowTone}`}
+            style={rowStyle}
             initial={{ opacity: 0, x: -18 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.35, delay: rowDelay, ease: 'easeOut' }}
@@ -213,15 +351,25 @@ function StandingsTable({
             <div className={`absolute right-0 top-0 bottom-0 w-[3px] rounded-l-full ${zoneRail}`} />
             <div className="flex-1 min-w-0 pr-2">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{
-                  flexShrink: 0, fontWeight: 800, fontSize: 11, fontVariantNumeric: 'tabular-nums',
-                  borderRadius: 999, padding: '2px 7px',
-                  color: badgeColor,
-                  background: badgeBackground,
-                  border: `1px solid ${badgeBorder}`,
-                  animation: s.position === 1 ? 'goldTextGlow 2.2s ease-in-out infinite' : s.position === 2 ? 'silverTextGlow 2.5s ease-in-out infinite' : s.position === 3 ? 'bronzeTextGlow 2.8s ease-in-out infinite' : undefined,
-                }}>#{s.position}</span>
-                <p className="text-[14px] font-semibold text-white truncate leading-snug">{s.player?.fullName ?? '—'}</p>
+                <div className="inline-flex shrink-0 items-center gap-1.5">
+                  <span style={{
+                    flexShrink: 0, fontWeight: 800, fontSize: 11, fontVariantNumeric: 'tabular-nums',
+                    borderRadius: 999, padding: '2px 7px',
+                    color: badgeColor,
+                    background: badgeBackground,
+                    border: `1px solid ${badgeBorder}`,
+                    boxShadow: highlightTone === 'gold' ? '0 0 7px rgba(250,204,21,0.34)' : highlightTone === 'silver' ? '0 0 7px rgba(203,213,225,0.24)' : highlightTone === 'bronze' ? '0 0 7px rgba(217,119,6,0.28)' : highlightTone === 'amber' ? '0 0 7px rgba(248,184,78,0.24)' : highlightTone === 'qualified' ? '0 0 6px rgba(248,184,78,0.20)' : undefined,
+                  }}>#{s.position}</span>
+                </div>
+                <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                  <p className="min-w-0 truncate text-[14px] font-semibold leading-snug text-white">{s.player?.fullName ?? '—'}</p>
+                  {highlightLabel && isHighlighted && (
+                    <span className="inline-flex h-5 shrink-0 items-center rounded-full border border-amber-400/25 bg-amber-400/10 px-1.5 text-[9px] font-bold uppercase tracking-[0.08em] text-amber-300">
+                      {highlightLabel}
+                    </span>
+                  )}
+                  <RankTrend currentRank={s.position} previousRank={s.player ? previousRanks[s.player.id] : undefined} />
+                </div>
               </div>
               {legTotal > 0 ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
@@ -430,87 +578,44 @@ function DvobojiTab({
   togglePair: (id: string) => void;
   selectedPlayer: Player | undefined;
 }) {
-  const pairStats = getPairStatusCounts(opponents);
-  const mostPlayed = [...opponents]
-    .sort((a, b) => b.between.length - a.between.length)[0];
-  const nextTargets = opponents.filter((o) => o.status === 'partial' || o.status === 'not_played').length;
-
   if (players.length < 2) return <p className="text-center text-slate-500 text-sm py-10">Nema dovoljno igrača.</p>;
 
   return (
     <div className="space-y-3">
-      <div className="rounded-2xl border border-slate-700/60 bg-slate-800/80 p-4 shadow-xl">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-orange-400/80 mb-1">
-              Dvoboji pregled
-            </p>
-            <h3 className="text-sm font-semibold text-white">
-              {selectedPlayer ? selectedPlayer.fullName : 'Izaberi igrača'}
-            </h3>
-            <p className="text-xs text-slate-400 mt-1">
-              Ovde vidiš kako stoji protiv svakog protivnika, ko je već odigran i ko još čeka.
-            </p>
-          </div>
-        </div>
+      <div className="relative overflow-hidden rounded-2xl border border-slate-700/60 bg-slate-900/85 p-4 shadow-[0_18px_50px_rgba(0,0,0,0.24)] sm:p-5">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(249,115,22,0.14),transparent_42%)] pointer-events-none" />
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-orange-300/45 to-transparent" />
 
-        <div className="grid grid-cols-2 gap-2 mt-4 sm:grid-cols-4">
-          {[
-            { label: 'Završeno', value: pairStats.completed, tone: 'text-emerald-400 bg-emerald-500/10' },
-            { label: 'Delimično', value: pairStats.partial, tone: 'text-amber-400 bg-amber-500/10' },
-            { label: 'Zakazano', value: pairStats.upcoming, tone: 'text-indigo-400 bg-indigo-500/10' },
-            { label: 'Nije igrano', value: pairStats.notPlayed, tone: 'text-slate-300 bg-slate-700/70' },
-          ].map((stat) => (
-            <div key={stat.label} className={`rounded-xl px-3 py-2.5 ${stat.tone}`}>
-              <div className="text-lg font-bold tabular-nums">{stat.value}</div>
-              <div className="text-[11px] font-medium opacity-90">{stat.label}</div>
+        <div className="relative grid gap-4 md:grid-cols-[1fr_280px] md:items-center">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-orange-400/25 bg-orange-500/12 text-orange-300 shadow-[0_0_20px_rgba(249,115,22,0.12)]">
+              <Users className="h-5 w-5" />
             </div>
-          ))}
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-orange-300/90">
+                Dvoboji
+              </p>
+              <h3 className="mt-1 text-base font-black tracking-tight text-white">
+                Pronađi svoj dvoboj
+              </h3>
+              <p className="mt-1.5 text-sm leading-6 text-slate-400">
+                Izaberi svoje ime i vidi protiv koga si igrao, kakvi su bili rezultati i ko te još čeka.
+              </p>
+            </div>
+          </div>
+
+          <div className="relative">
+            <select
+              value={selectedPlayerId}
+              onChange={e => onPlayerChange(e.target.value)}
+              className="h-12 w-full appearance-none rounded-2xl border border-slate-700/80 bg-slate-950/70 px-4 pr-10 text-[16px] font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] outline-none transition focus:border-orange-400/70 focus:ring-4 focus:ring-orange-500/10"
+              aria-label="Izaberi igrača za pregled dvoboja"
+            >
+              {players.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          </div>
         </div>
-
-        <div className="grid gap-2 mt-3 sm:grid-cols-2">
-          <div className="rounded-xl border border-slate-700/60 bg-slate-900/55 px-3 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Najviše puta protiv</p>
-            <p className="text-sm font-semibold text-white mt-1">
-              {mostPlayed?.between.length ? mostPlayed.opponent.fullName : 'Još nema duela'}
-            </p>
-            <p className="text-xs text-slate-400 mt-1">
-              {mostPlayed?.between.length ? `${mostPlayed.between.length} međusobnih susreta` : 'Kad krenu mečevi, ovde ćeš odmah videti najčešćeg protivnika.'}
-            </p>
-          </div>
-          <div className="rounded-xl border border-slate-700/60 bg-slate-900/55 px-3 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sledeći izazovi</p>
-            <p className="text-sm font-semibold text-white mt-1">{nextTargets}</p>
-            <p className="text-xs text-slate-400 mt-1">
-              {nextTargets > 0 ? 'Toliko protivnika još čeka potpuni rasplet ili prvi duel.' : 'Sve je odigrano ili je raspored potpuno zatvoren.'}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="relative">
-        <select
-          value={selectedPlayerId}
-          onChange={e => onPlayerChange(e.target.value)}
-          className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-xl px-3 py-2.5 pr-8 appearance-none focus:outline-none focus:border-orange-500"
-        >
-          {players.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}
-        </select>
-        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none text-slate-400" />
-      </div>
-
-      <div className="flex gap-4 px-4 py-3 rounded-xl bg-slate-800 border border-slate-700/50">
-        {[
-          { label: 'Završeno',  value: pairStats.completed,  color: 'text-emerald-400' },
-          { label: 'Delimično', value: pairStats.partial,    color: 'text-amber-400'   },
-          { label: 'Zakazano',  value: pairStats.upcoming,   color: 'text-indigo-400'  },
-          { label: 'Nije',      value: pairStats.not_played, color: 'text-slate-500'   },
-        ].map(s => (
-          <div key={s.label} className="flex items-baseline gap-1">
-            <span className={`text-sm font-bold tabular-nums ${s.color}`}>{s.value}</span>
-            <span className="text-[10px] text-slate-500">{s.label}</span>
-          </div>
-        ))}
       </div>
 
         <div className="space-y-2">
@@ -585,31 +690,7 @@ function GuidePanel({
   tabs: InfoTab[];
   activeTab: ActiveTab;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    try {
-      const hidden = window.localStorage.getItem('pikado-share-guide-hidden');
-      setExpanded(hidden === 'false');
-    } catch {
-      setExpanded(false);
-    } finally {
-      setReady(true);
-    }
-  }, []);
-
-  const toggleExpanded = () => {
-    setExpanded((prev) => {
-      const next = !prev;
-      try {
-        window.localStorage.setItem('pikado-share-guide-hidden', String(!next));
-      } catch {
-        // Ignore storage failures; the panel can still toggle locally.
-      }
-      return next;
-    });
-  };
+  const [open, setOpen] = useState(false);
 
   const guideItems = [
     {
@@ -641,81 +722,109 @@ function GuidePanel({
     },
   ].filter((item) => tabs.some((tab) => tab.id === item.id));
 
-  if (!ready || guideItems.length === 0) return null;
+  if (guideItems.length === 0) return null;
 
   return (
-    <motion.section
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, ease: 'easeOut' }}
-      className="mb-4 rounded-[24px] border border-orange-500/20 bg-slate-900/70 shadow-[0_20px_60px_rgba(0,0,0,0.22)] backdrop-blur-sm overflow-hidden"
-    >
-      <div className="relative px-4 sm:px-5 py-4 sm:py-5">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(249,115,22,0.16),transparent_42%)] pointer-events-none" />
+    <>
+      <motion.button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+86px)] right-4 z-40 flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-600/70 bg-slate-900/92 text-orange-300 shadow-[0_14px_34px_rgba(0,0,0,0.32)] backdrop-blur-md transition hover:border-orange-400/45 hover:text-orange-200 lg:bottom-[104px] lg:right-6"
+        whileTap={{ scale: 0.92 }}
+        aria-label="Otvori kratki vodič"
+        title="Kratki vodič"
+      >
+        <HelpCircle className="h-5 w-5" />
+      </motion.button>
 
-        <div className="relative flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-orange-400/80 mb-1">
-              Kratki vodič
-            </p>
-            <h2 className="text-base sm:text-lg font-bold text-white">
-              Kako da čitaš ovu stranicu?
-            </h2>
-            <p className="text-sm text-slate-400 mt-1 max-w-2xl">
-              Sve je na jednom mestu: pregled tabele, raspored mečeva i međusobni dueli igrača.
-              Ako ti je neki naziv bio nejasan, ovde je kratko objašnjenje za svaki deo.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={toggleExpanded}
-            className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-slate-700/80 bg-slate-800/80 px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:border-orange-500/30 hover:text-white"
-          >
-            {expanded ? 'Sakrij' : 'Prikaži'}
-            {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-          </button>
-        </div>
-
-        {expanded && (
-          <div className="relative mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {guideItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeTab === item.id;
-              return (
-                <div
-                  key={item.id}
-                  className={`relative overflow-hidden rounded-2xl border px-4 py-4 transition-all duration-200 ${
-                    isActive
-                      ? 'border-orange-500/40 bg-slate-800/95 shadow-[0_0_0_1px_rgba(249,115,22,0.16)]'
-                      : 'border-slate-700/70 bg-slate-800/70'
-                  }`}
-                >
-                  <div className={`absolute inset-0 bg-gradient-to-br ${item.accent} pointer-events-none`} />
-
-                  <div className="relative">
-                    <div className="flex items-start justify-between gap-3 mb-3">
-                      <div className={`inline-flex h-10 w-10 items-center justify-center rounded-2xl ${item.iconWrap}`}>
-                        <Icon className="w-[18px] h-[18px]" />
-                      </div>
-                      {isActive && (
-                        <span className="rounded-full bg-orange-500/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-orange-300">
-                          Otvoreno
-                        </span>
-                      )}
-                    </div>
-
-                    <h3 className="text-sm font-semibold text-white">{item.label}</h3>
-                    <p className="text-sm leading-6 text-slate-300 mt-2">{item.text}</p>
-                    <p className="text-xs leading-5 text-slate-400 mt-3">{item.helper}</p>
+      <AnimatePresence>
+        {open && (
+          <>
+            <motion.button
+              type="button"
+              className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px]"
+              onClick={() => setOpen(false)}
+              aria-label="Zatvori vodič"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            />
+            <motion.div
+              className="fixed inset-x-0 bottom-0 z-50 max-h-[86vh] overflow-y-auto rounded-t-3xl border border-slate-700/70 bg-slate-950 p-4 shadow-[0_-24px_70px_rgba(0,0,0,0.46)] lg:inset-auto lg:bottom-[168px] lg:right-6 lg:w-[430px] lg:max-h-[calc(100vh-190px)] lg:rounded-2xl"
+              style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
+              initial={{ opacity: 0, y: 28, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 20, scale: 0.98 }}
+              transition={{ duration: 0.18 }}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="share-guide-title"
+            >
+              <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-700 lg:hidden" />
+              <div className="relative overflow-hidden rounded-2xl border border-orange-500/20 bg-slate-900/70 p-4">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(249,115,22,0.16),transparent_48%)] pointer-events-none" />
+                <div className="relative flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-orange-300">Kratki vodič</p>
+                    <h2 id="share-guide-title" className="mt-1 text-lg font-black text-white">
+                      Kako da čitaš ovu stranicu?
+                    </h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-400">
+                      Sve je na jednom mestu: pregled tabele, raspored mečeva i međusobni dueli igrača.
+                      Ako ti je neki naziv bio nejasan, ovde je kratko objašnjenje za svaki deo.
+                    </p>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-700/70 bg-slate-950/70 text-slate-400 transition hover:text-white"
+                    aria-label="Zatvori"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
                 </div>
-              );
-            })}
-          </div>
+              </div>
+
+              <div className="mt-3 grid gap-3">
+                {guideItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeTab === item.id;
+                  return (
+                    <div
+                      key={item.id}
+                      className={`relative overflow-hidden rounded-2xl border p-4 transition-all duration-200 ${
+                        isActive
+                          ? 'border-orange-500/40 bg-slate-800/95 shadow-[0_0_0_1px_rgba(249,115,22,0.16)]'
+                          : 'border-slate-700/70 bg-slate-900/75'
+                      }`}
+                    >
+                      <div className={`absolute inset-0 bg-gradient-to-br ${item.accent} pointer-events-none`} />
+
+                      <div className="relative">
+                        <div className="mb-3 flex items-start justify-between gap-3">
+                          <div className={`inline-flex h-10 w-10 items-center justify-center rounded-2xl ${item.iconWrap}`}>
+                            <Icon className="h-[18px] w-[18px]" />
+                          </div>
+                          {isActive && (
+                            <span className="rounded-full bg-orange-500/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-orange-300">
+                              Otvoreno
+                            </span>
+                          )}
+                        </div>
+
+                        <h3 className="text-sm font-semibold text-white">{item.label}</h3>
+                        <p className="mt-2 text-sm leading-6 text-slate-300">{item.text}</p>
+                        <p className="mt-3 text-xs leading-5 text-slate-400">{item.helper}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </motion.div>
+          </>
         )}
-      </div>
-    </motion.section>
+      </AnimatePresence>
+    </>
   );
 }
 
@@ -767,6 +876,157 @@ function SegmentedControl({
   );
 }
 
+function ShareActions({
+  data,
+  shareUrl,
+  tabs,
+  activeTab,
+}: {
+  data: ShareData;
+  shareUrl: string;
+  tabs: InfoTab[];
+  activeTab: ActiveTab;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [shareStatus, setShareStatus] = useState('');
+  const [open, setOpen] = useState(false);
+  const { leader, leaderPoints } = getShareSummary(data);
+
+  const copyLink = async () => {
+    if (!shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+    } catch {
+      const input = document.createElement('input');
+      input.value = shareUrl;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  };
+
+  const nativeShare = async () => {
+    if (!shareUrl) return;
+    if (!navigator.share) {
+      await copyLink();
+      setShareStatus('Link kopiran');
+      setTimeout(() => setShareStatus(''), 1800);
+      return;
+    }
+
+    try {
+      await navigator.share({
+        title: `${data.league.name} - Pikado`,
+        text: `Prati tabelu, mečeve i rezultate za ${data.league.name}.`,
+        url: shareUrl,
+      });
+    } catch {
+      // User cancelled native share sheet.
+    }
+  };
+
+  const actionButtons = (
+    <div className="grid gap-2">
+      <button
+        type="button"
+        onClick={copyLink}
+        className="flex h-11 items-center justify-between rounded-xl border border-orange-400/25 bg-orange-500 px-3 text-sm font-bold text-white shadow-[0_0_18px_rgba(249,115,22,0.24)] transition active:scale-[0.98]"
+      >
+        <span className="inline-flex items-center gap-2">
+          {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+          {copied ? 'Kopirano' : 'Kopiraj link'}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={nativeShare}
+        className="flex h-11 items-center justify-between rounded-xl border border-slate-700/70 bg-slate-800 px-3 text-sm font-bold text-slate-100 transition active:scale-[0.98]"
+      >
+        <span className="inline-flex items-center gap-2">
+          <Share2 className="h-4 w-4" />
+          Podeli
+        </span>
+      </button>
+    </div>
+  );
+
+  return (
+    <>
+      <GuidePanel tabs={tabs} activeTab={activeTab} />
+
+      <motion.button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+18px)] right-4 z-40 flex h-14 w-14 items-center justify-center rounded-2xl border border-orange-300/35 bg-orange-500 text-white shadow-[0_16px_42px_rgba(0,0,0,0.35),0_0_24px_rgba(249,115,22,0.35)] lg:bottom-6 lg:right-6"
+        whileTap={{ scale: 0.92 }}
+        aria-label="Podeli ligu"
+        title="Podeli ligu"
+      >
+        <Share2 className="h-5 w-5" />
+      </motion.button>
+
+      <AnimatePresence>
+        {open && (
+          <>
+            <motion.button
+              type="button"
+              className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px]"
+              onClick={() => setOpen(false)}
+              aria-label="Zatvori deljenje"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            />
+            <motion.div
+              className="fixed inset-x-0 bottom-0 z-50 rounded-t-3xl border border-slate-700/70 bg-slate-950 p-4 shadow-[0_-24px_70px_rgba(0,0,0,0.46)] lg:inset-auto lg:bottom-24 lg:right-6 lg:w-[360px] lg:rounded-2xl lg:p-4"
+              style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
+              initial={{ opacity: 0, y: 28, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 20, scale: 0.98 }}
+              transition={{ duration: 0.18 }}
+            >
+              <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-700 lg:hidden" />
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-orange-300">Podeli ligu</p>
+                  <h2 className="mt-1 truncate text-lg font-black text-white">{data.league.name}</h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-700/70 bg-slate-900 text-slate-400"
+                  aria-label="Zatvori"
+                >
+                  <ChevronDown className="h-4 w-4 lg:rotate-[-90deg]" />
+                </button>
+              </div>
+
+              {actionButtons}
+              {shareStatus && <p className="mt-2 text-center text-xs font-semibold text-green-400">{shareStatus}</p>}
+
+              <div className="mt-3 grid gap-2">
+                <div className="flex items-center gap-3 rounded-xl border border-slate-700/60 bg-slate-900/70 p-2">
+                  <div className="rounded-xl bg-white p-1.5">
+                    {shareUrl ? <QRCode value={shareUrl} size={78} /> : <QrCode className="h-[78px] w-[78px] text-slate-300" />}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-white">QR profil</p>
+                    <p className="mt-0.5 text-[11px] text-slate-500">Skeniraj za live rezultate.</p>
+                    <p className="mt-2 truncate text-[10px] text-slate-600">{leader} · {leaderPoints} bodova</p>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+
 /* ── Main page ──────────────────────────────────────────────────────── */
 export default function SharePage() {
   const { token } = useParams<{ token: string }>();
@@ -779,9 +1039,11 @@ export default function SharePage() {
   const [dvobojiPlayerId, setDvobojiPlayerId] = useState<string>('');
   const [expandedPairs, setExpandedPairs] = useState<Set<string>>(new Set());
   const [activePhaseKey, setActivePhaseKey] = useState<string>('regular');
+  const [previousRankSnapshot, setPreviousRankSnapshot] = useState<RankSnapshot>({});
   const [refreshSpinKey, setRefreshSpinKey] = useState(0);
   const [pullDistance, setPullDistance] = useState(0);
   const [isPulling, setIsPulling] = useState(false);
+  const [shareUrl, setShareUrl] = useState('');
   const touchStartY = useRef(0);
   const PULL_THRESHOLD = 70;
 
@@ -807,6 +1069,10 @@ export default function SharePage() {
       d.phases = d.phases ?? [];
       d.standings = d.standings ?? [];
       d.groups = d.groups ?? [];
+      const previousSnapshot = readRankSnapshot(token);
+      const nextSnapshot = buildRankSnapshot(d);
+      setPreviousRankSnapshot(previousSnapshot);
+      writeRankSnapshot(token, nextSnapshot);
       setData(d);
       setLastUpdated(new Date());
       setError('');
@@ -830,6 +1096,10 @@ export default function SharePage() {
   useEffect(() => {
     document.documentElement.classList.add('dark');
     return () => document.documentElement.classList.remove('dark');
+  }, []);
+
+  useEffect(() => {
+    setShareUrl(window.location.href);
   }, []);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -1047,6 +1317,26 @@ export default function SharePage() {
           0%, 100% { box-shadow: 0 0 5px 1px rgba(217,119,6,0.3),   0 0 10px 2px rgba(217,119,6,0.12); }
           50%       { box-shadow: 0 0 9px 3px rgba(217,119,6,0.6),   0 0 18px 4px rgba(217,119,6,0.25); }
         }
+        @keyframes goldRowGlow {
+          0%, 100% { box-shadow: inset 0 0 0 1px rgba(250,204,21,0.46), 0 0 22px rgba(250,204,21,0.22); }
+          50%       { box-shadow: inset 0 0 0 1px rgba(250,204,21,0.72), 0 0 38px rgba(250,204,21,0.38); }
+        }
+        @keyframes silverRowGlow {
+          0%, 100% { box-shadow: inset 0 0 0 1px rgba(203,213,225,0.44), 0 0 21px rgba(203,213,225,0.19); }
+          50%       { box-shadow: inset 0 0 0 1px rgba(203,213,225,0.66), 0 0 34px rgba(203,213,225,0.32); }
+        }
+        @keyframes bronzeRowGlow {
+          0%, 100% { box-shadow: inset 0 0 0 1px rgba(217,119,6,0.46), 0 0 21px rgba(217,119,6,0.20); }
+          50%       { box-shadow: inset 0 0 0 1px rgba(217,119,6,0.70), 0 0 36px rgba(217,119,6,0.35); }
+        }
+        @keyframes amberRowGlow {
+          0%, 100% { box-shadow: inset 0 0 0 1px rgba(248,184,78,0.42), 0 0 20px rgba(248,184,78,0.18); }
+          50%       { box-shadow: inset 0 0 0 1px rgba(248,184,78,0.64), 0 0 32px rgba(248,184,78,0.30); }
+        }
+        @keyframes qualifiedRowGlow {
+          0%, 100% { box-shadow: inset 0 0 0 1px rgba(248,184,78,0.34), 0 0 18px rgba(248,184,78,0.12); }
+          50%       { box-shadow: inset 0 0 0 1px rgba(248,184,78,0.54), 0 0 28px rgba(248,184,78,0.22); }
+        }
         @keyframes neonBorderPulse {
           0%, 100% { box-shadow: 0 -1px 8px rgba(249,115,22,0.15), inset 0 -1px 0 rgba(249,115,22,0.25); }
           50%       { box-shadow: 0 -1px 18px rgba(249,115,22,0.45), inset 0 -1px 0 rgba(249,115,22,0.55); }
@@ -1066,6 +1356,14 @@ export default function SharePage() {
         @keyframes bronzeTextGlow {
           0%, 100% { text-shadow: 0 0 8px rgba(217,119,6,0.75), 0 0 18px rgba(217,119,6,0.45), 0 0 35px rgba(217,119,6,0.18); }
           50%       { text-shadow: 0 0 13px rgba(217,119,6,1), 0 0 28px rgba(217,119,6,0.75), 0 0 55px rgba(217,119,6,0.35); }
+        }
+        @keyframes amberTextGlow {
+          0%, 100% { text-shadow: 0 0 8px rgba(248,184,78,0.72), 0 0 18px rgba(248,184,78,0.38), 0 0 35px rgba(248,184,78,0.14); }
+          50%       { text-shadow: 0 0 12px rgba(248,184,78,0.95), 0 0 26px rgba(248,184,78,0.65), 0 0 48px rgba(248,184,78,0.26); }
+        }
+        @keyframes qualifiedTextGlow {
+          0%, 100% { text-shadow: 0 0 7px rgba(248,184,78,0.58), 0 0 16px rgba(248,184,78,0.28), 0 0 30px rgba(248,184,78,0.10); }
+          50%       { text-shadow: 0 0 11px rgba(248,184,78,0.84), 0 0 24px rgba(248,184,78,0.48), 0 0 42px rgba(248,184,78,0.18); }
         }
         @keyframes emberFloat1 {
           0%   { transform: translateY(0px)   translateX(0px);  opacity: 0; }
@@ -1197,6 +1495,8 @@ export default function SharePage() {
         </motion.div>
       </div>
 
+      {data && <ShareActions data={data} shareUrl={shareUrl} tabs={visibleTabs} activeTab={activeTab} />}
+
       {/* ── Sticky nav ── */}
       <div className="sticky top-0 z-10 bg-slate-900 border-b border-slate-800">
         <div className="max-w-lg lg:max-w-5xl mx-auto">
@@ -1255,10 +1555,6 @@ export default function SharePage() {
           </div>
         )}
 
-        {!loading && data && (
-          <GuidePanel tabs={visibleTabs} activeTab={activeTab} />
-        )}
-
         <AnimatePresence mode="wait" initial={false}>
           {!loading && data && (
             <motion.div
@@ -1274,6 +1570,22 @@ export default function SharePage() {
                   {activeTab === 'tabela' && activePhase.type === 'round_robin' && (
                     <StandingsTable
                       standings={activePhase.standings}
+                      previousRanks={previousRankSnapshot[activePhase.id]}
+                      highlightedPositions={
+                        /baraž|baraz/i.test(activePhase.name)
+                          ? [1, 2]
+                          : /top\s*10/i.test(activePhase.name)
+                            ? [1, 2, 3, 4]
+                            : [1, 2, 3, 4, 5, 6, 7, 8]
+                      }
+                      highlightMode={/baraž|baraz|top\s*10/i.test(activePhase.name) ? 'qualified' : 'qualified'}
+                      tableTone={
+                        /baraž|baraz/i.test(activePhase.name)
+                          ? 'baraz'
+                          : /top\s*10/i.test(activePhase.name)
+                            ? 'top10'
+                            : 'regular'
+                      }
                       zones={
                         /baraž|baraz/i.test(activePhase.name)
                           ? { advanceUntil: 2 }
@@ -1309,7 +1621,16 @@ export default function SharePage() {
               {/* ── Regular season content ── */}
               {activePhaseKey === 'regular' && (
                 <>
-                  {activeTab === 'tabela' && <StandingsTable standings={data.standings} zones={{ advanceUntil: 8, barazUntil: 20 }} />}
+                  {activeTab === 'tabela' && (
+                    <StandingsTable
+                      standings={data.standings}
+                      zones={{ advanceUntil: 8, barazUntil: 20 }}
+                      highlightedPositions={[1, 2, 3, 4, 5, 6, 7, 8]}
+                      highlightMode="qualified"
+                      tableTone="zoned"
+                      previousRanks={previousRankSnapshot.regular}
+                    />
+                  )}
                   {activeTab === 'mecevi' && (
                     <MatchGroups
                       groups={regularMatchGroups}
