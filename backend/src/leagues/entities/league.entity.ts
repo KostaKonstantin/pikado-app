@@ -59,6 +59,12 @@ export class League {
   @Column({ name: 'active_phase_id', type: 'varchar', nullable: true })
   activePhaseId: string | null;
 
+  @Column({ name: 'rank_snapshots', type: 'jsonb', default: () => "'{}'" })
+  rankSnapshots: Record<string, Record<string, number>>;
+
+  @Column({ name: 'rank_movements', type: 'jsonb', default: () => "'{}'" })
+  rankMovements: Record<string, Record<string, { previousPosition: number; currentPosition: number; delta: number }>>;
+
   @OneToMany(() => LeaguePlayer, (lp) => lp.league)
   leaguePlayers: LeaguePlayer[];
 

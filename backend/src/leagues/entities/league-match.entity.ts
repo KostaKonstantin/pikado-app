@@ -93,6 +93,15 @@ export class LeagueMatch {
   @Column({ name: 'is_walkover', default: false })
   isWalkover: boolean;
 
+  @Column({ name: 'is_dnf_result', default: false })
+  isDnfResult: boolean;
+
+  @Column({ name: 'dnf_player_id', type: 'varchar', nullable: true })
+  dnfPlayerId: string | null;
+
+  @Column({ name: 'dnf_applied_at', type: 'timestamptz', nullable: true })
+  dnfAppliedAt: Date | null;
+
   @Column({ name: 'played_at', nullable: true })
   playedAt: Date;
 

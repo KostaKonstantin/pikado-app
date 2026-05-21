@@ -44,12 +44,21 @@ export class ShareService {
       awaySets: m.awaySets,
       status: m.status,
       winnerId: m.winnerId,
+      isWalkover: m.isWalkover,
+      isDnfResult: m.isDnfResult,
+      dnfPlayerId: m.dnfPlayerId,
       isPostponed: m.isPostponed,
       scheduledDate: m.scheduledDate,
     };
   }
 
-  private buildStandings(players: Player[], completedMatches: LeagueMatch[], league: League) {
+  private buildStandings(
+    players: Player[],
+    completedMatches: LeagueMatch[],
+    league: League,
+    dnfPlayerIds = new Set<string>(),
+    rankMovements: Record<string, { previousPosition: number; currentPosition: number; delta: number }> = {},
+  ) {
     const statsMap = new Map<string, any>();
     for (const p of players) {
       statsMap.set(p.id, {
@@ -87,9 +96,25 @@ export class ShareService {
       }
     }
 
+    const expectedDnfMatches = Math.max((players.length - 1) * 2, 0);
+    for (const playerId of dnfPlayerIds) {
+      const standing = statsMap.get(playerId);
+      if (!standing) continue;
+      standing.played = expectedDnfMatches;
+      standing.won = 0;
+      standing.drawn = 0;
+      standing.lost = expectedDnfMatches;
+      standing.setsFor = 0;
+      standing.setsAgainst = expectedDnfMatches * 4;
+      standing.points = expectedDnfMatches * league.pointsLoss;
+    }
+
     const getH2H = (a: string, b: string) => h2hPoints.get(`${a}→${b}`) ?? 0;
     return Array.from(statsMap.values())
       .sort((a, b) => {
+        const aDnf = dnfPlayerIds.has(a.player.id);
+        const bDnf = dnfPlayerIds.has(b.player.id);
+        if (aDnf !== bDnf) return aDnf ? 1 : -1;
         if (b.points !== a.points) return b.points - a.points;
         const aDiff = a.setsFor - a.setsAgainst;
         const bDiff = b.setsFor - b.setsAgainst;
@@ -97,7 +122,16 @@ export class ShareService {
         if (b.setsFor !== a.setsFor) return b.setsFor - a.setsFor;
         return getH2H(b.player.id, a.player.id) - getH2H(a.player.id, b.player.id);
       })
-      .map((s, i) => ({ position: i + 1, ...s }));
+      .map((s, i) => {
+        const movement = rankMovements[s.player.id];
+        return {
+          position: i + 1,
+          ...s,
+          isDnf: dnfPlayerIds.has(s.player.id),
+          previousPosition: movement?.previousPosition ?? null,
+          rankDelta: movement?.delta ?? 0,
+        };
+      });
   }
 
   async getByToken(token: string) {
@@ -120,7 +154,13 @@ export class ShareService {
     });
 
     const regularPlayers = leaguePlayers.map(lp => lp.player);
-    const standings = this.buildStandings(regularPlayers, regularCompleted, league);
+    const standings = this.buildStandings(
+      regularPlayers,
+      regularCompleted,
+      league,
+      new Set<string>(),
+      league.rankMovements?.regular ?? {},
+    );
 
     // ── Regular season groups ──────────────────────────────────────────────
     let groups: { label: number; sessionStatus?: string; matches: any[] }[] = [];
@@ -189,7 +229,13 @@ export class ShareService {
         );
 
         const phaseStandings = phase.type === 'round_robin'
-          ? this.buildStandings(players, phaseCompleted, league)
+          ? this.buildStandings(
+              players,
+              phaseCompleted,
+              league,
+              new Set(phase.dnfPlayerIds ?? []),
+              league.rankMovements?.[phase.id] ?? {},
+            )
           : [];
 
         let phaseGroups: { label: number; sessionStatus?: string; matches: any[] }[] = [];
@@ -209,6 +255,7 @@ export class ShareService {
           } else {
             // Round robin: only show matches assigned to an explicit Ligaški Dan (sessionId not null)
             const assignedMatches = phaseMatches.filter(m => m.sessionId !== null && m.homePlayerId !== null && m.awayPlayerId !== null);
+            const dnfMatches = phaseMatches.filter(m => m.isDnfResult && m.sessionId === null && m.homePlayerId !== null && m.awayPlayerId !== null);
             const sessionIds = [...new Set(assignedMatches.map(m => m.sessionId as string))];
 
             for (const sessionId of sessionIds) {
@@ -224,7 +271,13 @@ export class ShareService {
                 matches: sessionMatches.map(m => this.buildMatchRow(m)),
               });
             }
-            phaseGroups.sort((a, b) => a.label - b.label);
+            if (dnfMatches.length > 0) {
+              phaseGroups.push({
+                label: -1,
+                matches: dnfMatches.map(m => this.buildMatchRow(m)),
+              });
+            }
+            phaseGroups.sort((a, b) => (a.label === -1 ? Number.MAX_SAFE_INTEGER : a.label) - (b.label === -1 ? Number.MAX_SAFE_INTEGER : b.label));
           }
         } else {
           const roundsMap = new Map<number, any[]>();

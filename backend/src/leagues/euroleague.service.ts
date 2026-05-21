@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { CompetitionPhase } from './entities/competition-phase.entity';
 import { LeagueMatch } from './entities/league-match.entity';
 import { LeaguePlayer } from './entities/league-player.entity';
@@ -14,6 +14,12 @@ const PHASE_BARAZ    = 2;
 const PHASE_TOP10    = 3;
 const PHASE_PLAYOFF  = 4;
 
+type RankedRow = { position: number; player?: { id?: string } | null; playerId?: string };
+
+function rowPlayerId(row: RankedRow): string | undefined {
+  return row.player?.id ?? row.playerId;
+}
+
 @Injectable()
 export class EuroleagueService {
   constructor(
@@ -22,6 +28,7 @@ export class EuroleagueService {
     @InjectRepository(LeaguePlayer)     private lpRepo:    Repository<LeaguePlayer>,
     @InjectRepository(League)           private leagueRepo: Repository<League>,
     private readonly fixtureService: FixtureService,
+    private readonly dataSource: DataSource,
   ) {}
 
   // ─── Auth / guard ─────────────────────────────────────────────────────────────
@@ -160,7 +167,26 @@ export class EuroleagueService {
       }
     }
 
+    const dnfPlayerIds = new Set(phase.dnfPlayerIds ?? []);
+    const expectedDnfMatches = Math.max((phase.playerIds.length - 1) * 2, 0);
+    for (const playerId of dnfPlayerIds) {
+      const standing = map.get(playerId);
+      if (!standing) continue;
+      standing.played = expectedDnfMatches;
+      standing.wins = 0;
+      standing.draws = 0;
+      standing.losses = expectedDnfMatches;
+      standing.points = expectedDnfMatches * league.pointsLoss;
+      standing.setsFor = 0;
+      standing.setsAgainst = expectedDnfMatches * 4;
+      standing.legsFor = 0;
+      standing.legsAgainst = 0;
+    }
+
     const sorted = [...map.values()].sort((a, b) => {
+      const aDnf = dnfPlayerIds.has(a.playerId);
+      const bDnf = dnfPlayerIds.has(b.playerId);
+      if (aDnf !== bDnf) return aDnf ? 1 : -1;
       if (b.points !== a.points) return b.points - a.points;
       const da = a.setsFor - a.setsAgainst;
       const db = b.setsFor - b.setsAgainst;
@@ -168,7 +194,162 @@ export class EuroleagueService {
       return b.setsFor - a.setsFor;
     });
 
-    return sorted.map((s, i) => ({ ...s, position: i + 1 }));
+    return sorted.map((s, i) => ({ ...s, position: i + 1, isDnf: dnfPlayerIds.has(s.playerId) }));
+  }
+
+  async markPhasePlayerDnf(
+    clubId: string,
+    leagueId: string,
+    phaseId: string,
+    playerId: string,
+    reason?: string | null,
+  ) {
+    await this.verifyLeague(clubId, leagueId);
+    const beforeStandings = await this.getPhaseStandings(clubId, leagueId, phaseId);
+
+    const result = await this.dataSource.transaction(async (manager) => {
+      const phaseRepo = manager.getRepository(CompetitionPhase);
+      const matchRepo = manager.getRepository(LeagueMatch);
+
+      const phase = await phaseRepo.findOne({ where: { id: phaseId, leagueId } });
+      if (!phase) throw new NotFoundException('Faza nije pronađena');
+      if (phase.type !== 'round_robin') throw new BadRequestException('DNF je dozvoljen samo za ligaške faze');
+      if (![PHASE_REGULAR, PHASE_BARAZ, PHASE_TOP10].includes(phase.phaseOrder)) {
+        throw new BadRequestException('DNF nije dozvoljen za ovu fazu');
+      }
+      if (!phase.playerIds.includes(playerId)) {
+        throw new BadRequestException('Igrač nije učesnik ove faze');
+      }
+
+      const appliedAt = new Date();
+      const expectedPerPair = 2;
+      const opponentIds = phase.playerIds.filter((id) => id !== playerId);
+      const allPhaseMatches = await matchRepo.find({ where: { leagueId, phaseId } });
+      let updated = 0;
+      let created = 0;
+
+      const maxRound = allPhaseMatches.reduce((max, m) => Math.max(max, m.roundNumber ?? 0), 0);
+      let nextRound = maxRound + 1;
+      let nextOrder = allPhaseMatches.reduce((max, m) => Math.max(max, m.matchOrder ?? 0), 0) + 1;
+
+      for (const opponentId of opponentIds) {
+        const between = allPhaseMatches
+          .filter((m) =>
+            (m.homePlayerId === playerId && m.awayPlayerId === opponentId) ||
+            (m.homePlayerId === opponentId && m.awayPlayerId === playerId),
+          )
+          .sort((a, b) => (a.matchOrder ?? 0) - (b.matchOrder ?? 0));
+
+        for (const match of between) {
+          const dnfIsHome = match.homePlayerId === playerId;
+          await matchRepo.update(match.id, {
+            homeSets: dnfIsHome ? 0 : 4,
+            awaySets: dnfIsHome ? 4 : 0,
+            homeLegs: 0,
+            awayLegs: 0,
+            winnerId: dnfIsHome ? match.awayPlayerId : match.homePlayerId,
+            status: MatchStatus.COMPLETED,
+            isPostponed: false,
+            isWalkover: false,
+            isDnfResult: true,
+            dnfPlayerId: playerId,
+            dnfAppliedAt: appliedAt,
+            playedAt: appliedAt,
+          });
+          updated++;
+        }
+
+        for (let i = between.length; i < expectedPerPair; i++) {
+          const dnfIsHome = i % 2 === 0;
+          await matchRepo.save(matchRepo.create({
+            leagueId,
+            phaseId,
+            homePlayerId: dnfIsHome ? playerId : opponentId,
+            awayPlayerId: dnfIsHome ? opponentId : playerId,
+            homeSets: dnfIsHome ? 0 : 4,
+            awaySets: dnfIsHome ? 4 : 0,
+            homeLegs: 0,
+            awayLegs: 0,
+            winnerId: opponentId,
+            status: MatchStatus.COMPLETED,
+            roundNumber: nextRound++,
+            sessionNumber: 0,
+            matchOrder: nextOrder++,
+            scheduledDate: null,
+            isPostponed: false,
+            sessionId: null,
+            isWalkover: false,
+            isDnfResult: true,
+            dnfPlayerId: playerId,
+            dnfAppliedAt: appliedAt,
+            playedAt: appliedAt,
+            phaseMatchType: null,
+          }));
+          created++;
+        }
+      }
+
+      const dnfPlayerIds = Array.from(new Set([...(phase.dnfPlayerIds ?? []), playerId]));
+      const existingRecords = phase.dnfRecords ?? [];
+      const dnfRecords = existingRecords.some((r) => r.playerId === playerId)
+        ? existingRecords.map((r) => r.playerId === playerId ? { ...r, reason: reason ?? r.reason ?? null } : r)
+        : [...existingRecords, { playerId, reason: reason ?? null, appliedAt: appliedAt.toISOString() }];
+
+      await phaseRepo.update(phase.id, { dnfPlayerIds, dnfRecords });
+
+      return {
+        playerId,
+        phaseId,
+        updated,
+        created,
+        total: updated + created,
+      };
+    });
+
+    const afterStandings = await this.getPhaseStandings(clubId, leagueId, phaseId);
+    await this.persistRankMovement(leagueId, phaseId, beforeStandings, afterStandings);
+    return result;
+  }
+
+  private buildRankSnapshot(rows: RankedRow[]) {
+    return rows.reduce<Record<string, number>>((acc, row) => {
+      const playerId = rowPlayerId(row);
+      if (playerId) acc[playerId] = row.position;
+      return acc;
+    }, {});
+  }
+
+  private buildRankMovement(beforeRows: RankedRow[], afterRows: RankedRow[]) {
+    const before = this.buildRankSnapshot(beforeRows);
+    return afterRows.reduce<Record<string, { previousPosition: number; currentPosition: number; delta: number }>>((acc, row) => {
+      const playerId = rowPlayerId(row);
+      if (!playerId || !before[playerId]) return acc;
+      const delta = before[playerId] - row.position;
+      if (delta !== 0) {
+        acc[playerId] = {
+          previousPosition: before[playerId],
+          currentPosition: row.position,
+          delta,
+        };
+      }
+      return acc;
+    }, {});
+  }
+
+  private async persistRankMovement(leagueId: string, tableKey: string, beforeRows: RankedRow[], afterRows: RankedRow[]) {
+    const league = await this.leagueRepo.findOne({ where: { id: leagueId } });
+    if (!league) return;
+
+    await this.leagueRepo.update(leagueId, {
+      rankSnapshots: {
+        ...(league.rankSnapshots ?? {}),
+        [tableKey]: this.buildRankSnapshot(afterRows),
+      },
+      rankMovements: {
+        ...(league.rankMovements ?? {}),
+        [tableKey]: this.buildRankMovement(beforeRows, afterRows),
+      },
+    });
   }
 
   // ─── Update match result (works for both round-robin and knockout) ────────────
@@ -183,9 +364,13 @@ export class EuroleagueService {
     const league = await this.verifyLeague(clubId, leagueId);
     const phase  = await this.phaseRepo.findOne({ where: { id: phaseId, leagueId } });
     if (!phase) throw new NotFoundException('Faza nije pronađena');
+    const beforeStandings = phase.type === 'round_robin'
+      ? await this.getPhaseStandings(clubId, leagueId, phaseId)
+      : [];
 
     const match = await this.matchRepo.findOne({ where: { id: matchId, leagueId, phaseId } });
     if (!match) throw new NotFoundException('Meč nije pronađen');
+    if (match.isDnfResult) throw new BadRequestException('DNF meč ne može ručno da se menja');
 
     let winnerId: string | null = null;
     let status = MatchStatus.COMPLETED;
@@ -208,6 +393,11 @@ export class EuroleagueService {
     // Auto-advance playoff winner to Final
     if (phase.type === 'knockout' && status === MatchStatus.COMPLETED && winnerId) {
       await this.advancePlayoffWinner(leagueId, phaseId, match, winnerId);
+    }
+
+    if (phase.type === 'round_robin') {
+      const afterStandings = await this.getPhaseStandings(clubId, leagueId, phaseId);
+      await this.persistRankMovement(leagueId, phaseId, beforeStandings, afterStandings);
     }
 
     return this.matchRepo.findOne({ where: { id: matchId }, relations: ['homePlayer', 'awayPlayer'] });

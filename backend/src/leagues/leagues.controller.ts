@@ -291,6 +291,18 @@ export class LeaguesController {
     return this.euroleagueService.updatePhaseMatch(clubId, id, phaseId, matchId, body.homeSets, body.awaySets);
   }
 
+  @Post(':id/phases/:phaseId/players/:playerId/dnf')
+  @Roles(ClubRole.CLUB_ADMIN, ClubRole.ORGANIZER)
+  markPhasePlayerDnf(
+    @Param('clubId') clubId: string,
+    @Param('id') id: string,
+    @Param('phaseId') phaseId: string,
+    @Param('playerId') playerId: string,
+    @Body() body: { reason?: string | null },
+  ) {
+    return this.euroleagueService.markPhasePlayerDnf(clubId, id, phaseId, playerId, body.reason);
+  }
+
   @Post(':id/phases/advance')
   @Roles(ClubRole.CLUB_ADMIN, ClubRole.ORGANIZER)
   advancePhase(@Param('clubId') clubId: string, @Param('id') id: string) {

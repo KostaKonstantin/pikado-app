@@ -23,6 +23,12 @@ function slugify(text: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
+type RankedRow = { position: number; player?: { id?: string } | null; playerId?: string };
+
+function rowPlayerId(row: RankedRow): string | undefined {
+  return row.player?.id ?? row.playerId;
+}
+
 @Injectable()
 export class LeaguesService {
   constructor(
@@ -176,6 +182,7 @@ export class LeaguesService {
     const league = await this.findOne(clubId, leagueId);
     const match = await this.lmRepo.findOne({ where: { id: matchId, leagueId } });
     if (!match) throw new NotFoundException('Meč nije pronađen');
+    const beforeStandings = await this.getStandings(clubId, leagueId);
 
     const max = league.setsPerMatch === 1 ? league.legsPerSet : league.setsPerMatch;
     if (homeSets < 0 || awaySets < 0) {
@@ -205,12 +212,56 @@ export class LeaguesService {
     await this.lmRepo.update(matchId, {
       homeSets,
       awaySets,
-      winnerId: winnerId ?? undefined,
+      winnerId,
       status: MatchStatus.COMPLETED,
       playedAt: new Date(),
     });
 
+    const afterStandings = await this.getStandings(clubId, leagueId);
+    await this.persistRankMovement(leagueId, 'regular', beforeStandings, afterStandings);
+
     return this.lmRepo.findOne({ where: { id: matchId }, relations: ['homePlayer', 'awayPlayer'] });
+  }
+
+  private buildRankSnapshot(rows: RankedRow[]) {
+    return rows.reduce<Record<string, number>>((acc, row) => {
+      const playerId = rowPlayerId(row);
+      if (playerId) acc[playerId] = row.position;
+      return acc;
+    }, {});
+  }
+
+  private buildRankMovement(beforeRows: RankedRow[], afterRows: RankedRow[]) {
+    const before = this.buildRankSnapshot(beforeRows);
+    return afterRows.reduce<Record<string, { previousPosition: number; currentPosition: number; delta: number }>>((acc, row) => {
+      const playerId = rowPlayerId(row);
+      if (!playerId || !before[playerId]) return acc;
+      const delta = before[playerId] - row.position;
+      if (delta !== 0) {
+        acc[playerId] = {
+          previousPosition: before[playerId],
+          currentPosition: row.position,
+          delta,
+        };
+      }
+      return acc;
+    }, {});
+  }
+
+  private async persistRankMovement(leagueId: string, tableKey: string, beforeRows: RankedRow[], afterRows: RankedRow[]) {
+    const league = await this.leagueRepo.findOne({ where: { id: leagueId } });
+    if (!league) return;
+
+    await this.leagueRepo.update(leagueId, {
+      rankSnapshots: {
+        ...(league.rankSnapshots ?? {}),
+        [tableKey]: this.buildRankSnapshot(afterRows),
+      },
+      rankMovements: {
+        ...(league.rankMovements ?? {}),
+        [tableKey]: this.buildRankMovement(beforeRows, afterRows),
+      },
+    });
   }
 
   private validateSubstitutionInput(
@@ -608,6 +659,7 @@ export class LeaguesService {
     const league = await this.findOne(clubId, leagueId);
     const match = await this.lmRepo.findOne({ where: { id: matchId, leagueId } });
     if (!match) throw new NotFoundException('Meč nije pronađen');
+    const beforeStandings = await this.getStandings(clubId, leagueId);
     if (match.status === MatchStatus.COMPLETED || match.status === MatchStatus.WALKOVER) {
       throw new BadRequestException('Meč je već završen');
     }
@@ -630,6 +682,9 @@ export class LeaguesService {
       playedAt: new Date(),
       isPostponed: false,
     });
+
+    const afterStandings = await this.getStandings(clubId, leagueId);
+    await this.persistRankMovement(leagueId, 'regular', beforeStandings, afterStandings);
 
     return this.lmRepo.findOne({ where: { id: matchId }, relations: ['homePlayer', 'awayPlayer'] });
   }

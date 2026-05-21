@@ -15,6 +15,9 @@ type StandingRow = {
   player: Player | null;
   played: number; won: number; lost: number; drawn: number;
   setsFor: number; setsAgainst: number; points: number;
+  isDnf?: boolean;
+  previousPosition?: number | null;
+  rankDelta?: number;
 };
 
 type MatchRow = {
@@ -23,6 +26,7 @@ type MatchRow = {
   awayPlayer: Player | null;
   homeSets: number; awaySets: number;
   status: string; winnerId: string | null;
+  isWalkover?: boolean; isDnfResult?: boolean; dnfPlayerId?: string | null;
   isPostponed: boolean; scheduledDate: string | null;
 };
 
@@ -52,7 +56,6 @@ type SegmentedItem = {
   label: string;
   live?: boolean;
 };
-type RankSnapshot = Record<string, Record<string, number>>;
 
 function formatLeagueMeta(format: string, mode: string) {
   const formatLabel = format === 'home_away' ? 'Dvokružni sistem' : 'Jednokružni sistem';
@@ -64,44 +67,17 @@ function formatLeagueMeta(format: string, mode: string) {
   return { formatLabel, modeLabel };
 }
 
-function buildRankSnapshot(data: ShareData): RankSnapshot {
-  const snapshot: RankSnapshot = {};
-  const addTable = (key: string, standings: StandingRow[]) => {
-    snapshot[key] = standings.reduce<Record<string, number>>((acc, row) => {
-      if (row.player) acc[row.player.id] = row.position;
-      return acc;
-    }, {});
-  };
-
-  addTable('regular', data.standings);
-  data.phases.forEach((phase) => addTable(phase.id, phase.standings));
-  return snapshot;
-}
-
-function readRankSnapshot(token: string): RankSnapshot {
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = window.localStorage.getItem(`pikado-share-rank-snapshot:${token}`);
-    return raw ? JSON.parse(raw) as RankSnapshot : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeRankSnapshot(token: string, snapshot: RankSnapshot) {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(`pikado-share-rank-snapshot:${token}`, JSON.stringify(snapshot));
-  } catch {
-    // Trend indicators are best-effort; the table should still render if storage is unavailable.
-  }
-}
-
 function getShareSummary(data: ShareData) {
   const leader = data.standings[0]?.player?.fullName ?? 'Pikado liga';
   const leaderPoints = data.standings[0]?.points ?? 0;
 
   return { leader, leaderPoints };
+}
+
+function orderEuroleagueMatchGroups(groups: Group[]) {
+  const regularGroups = groups.filter((group) => group.label !== -1).reverse();
+  const dnfGroups = groups.filter((group) => group.label === -1);
+  return [...regularGroups, ...dnfGroups];
 }
 
 /* ── Sub-components ─────────────────────────────────────────────────── */
@@ -148,8 +124,8 @@ function CountUp({ value, delay = 0 }: { value: number; delay?: number }) {
   return <>{display}</>;
 }
 
-function RankTrend({ currentRank, previousRank }: { currentRank: number; previousRank?: number }) {
-  const delta = previousRank ? previousRank - currentRank : 0;
+function RankTrend({ delta }: { delta?: number }) {
+  if (!delta) return null;
   const label = delta > 0 ? `↑${delta}` : delta < 0 ? `↓${Math.abs(delta)}` : '—';
   const className = delta > 0
     ? 'text-green-400 bg-green-400/10 border-green-400/20'
@@ -160,8 +136,8 @@ function RankTrend({ currentRank, previousRank }: { currentRank: number; previou
   return (
     <span
       className={`inline-flex h-5 w-8 items-center justify-center rounded-full border text-[10px] font-bold tabular-nums leading-none ${className}`}
-      aria-label={delta > 0 ? `Napredovao ${delta}` : delta < 0 ? `Pao ${Math.abs(delta)}` : 'Bez promene'}
-      title={delta > 0 ? `+${delta} pozicija` : delta < 0 ? `-${Math.abs(delta)} pozicija` : 'Bez promene'}
+      aria-label={delta > 0 ? `Napredovao ${delta}` : `Pao ${Math.abs(delta)}`}
+      title={delta > 0 ? `+${delta} pozicija` : `-${Math.abs(delta)} pozicija`}
     >
       {label}
     </span>
@@ -182,7 +158,6 @@ function StandingsTable({
   highlightMode = 'medal',
   highlightLabel,
   tableTone = 'zoned',
-  previousRanks = {},
 }: {
   standings: StandingRow[];
   zones?: ZoneConfig;
@@ -190,7 +165,6 @@ function StandingsTable({
   highlightMode?: 'medal' | 'qualified';
   highlightLabel?: string;
   tableTone?: 'zoned' | 'regular' | 'baraz' | 'top10';
-  previousRanks?: Record<string, number>;
 }) {
   return (
     <div className="rounded-2xl overflow-hidden shadow-2xl border border-slate-700/70">
@@ -362,13 +336,18 @@ function StandingsTable({
                   }}>#{s.position}</span>
                 </div>
                 <div className="flex min-w-0 flex-1 items-center gap-1.5">
-                  <p className="min-w-0 truncate text-[14px] font-semibold leading-snug text-white">{s.player?.fullName ?? '—'}</p>
+                  <p className={`min-w-0 truncate text-[14px] font-semibold leading-snug ${s.isDnf ? 'text-slate-400 line-through decoration-red-400/70' : 'text-white'}`}>{s.player?.fullName ?? '—'}</p>
+                  {s.isDnf && (
+                    <span className="inline-flex h-5 shrink-0 items-center rounded-full border border-red-500/30 bg-red-500/10 px-1.5 text-[9px] font-black uppercase tracking-[0.12em] text-red-300">
+                      DNF
+                    </span>
+                  )}
                   {highlightLabel && isHighlighted && (
                     <span className="inline-flex h-5 shrink-0 items-center rounded-full border border-amber-400/25 bg-amber-400/10 px-1.5 text-[9px] font-bold uppercase tracking-[0.08em] text-amber-300">
                       {highlightLabel}
                     </span>
                   )}
-                  <RankTrend currentRank={s.position} previousRank={s.player ? previousRanks[s.player.id] : undefined} />
+                  <RankTrend delta={s.rankDelta} />
                 </div>
               </div>
               {legTotal > 0 ? (
@@ -424,11 +403,11 @@ function MatchGroups({
         const isExpanded = expandedGroups.has(group.label);
         const doneCount = group.matches.filter(m => m.status === 'completed').length;
         const playersInGroup = Array.from(
-          new Map(
-            group.matches.flatMap((m) => [
-              m.homePlayer ? [[m.homePlayer.id, m.homePlayer.fullName]] : [],
-              m.awayPlayer ? [[m.awayPlayer.id, m.awayPlayer.fullName]] : [],
-            ].flat()),
+          new Map<string, string>(
+            group.matches.flatMap((m): [string, string][] => [
+              ...(m.homePlayer ? [[m.homePlayer.id, m.homePlayer.fullName] as [string, string]] : []),
+              ...(m.awayPlayer ? [[m.awayPlayer.id, m.awayPlayer.fullName] as [string, string]] : []),
+            ]),
           ).entries(),
         ).map(([id, fullName]) => ({ id, fullName }));
         const selectedGroupPlayerId = groupPlayerFilter[group.label] ?? '';
@@ -535,10 +514,13 @@ function MatchGroups({
                         <p className={`flex-1 text-sm text-right leading-tight truncate ${homeWon ? 'font-bold text-white' : 'text-slate-300'} ${playerSelectedHome ? 'text-orange-300' : ''}`}>
                           {m.homePlayer?.fullName ?? '—'}
                         </p>
-                        <div className="shrink-0 w-14 sm:w-16 text-center">
-                          {isDone ? (
-                            <span className="text-sm font-bold text-orange-400 tabular-nums">{m.homeSets} : {m.awaySets}</span>
-                          ) : m.isPostponed ? (
+                  <div className="shrink-0 w-14 sm:w-16 text-center">
+                    {isDone ? (
+                      <span className="inline-flex flex-col items-center gap-0.5">
+                        <span className="text-sm font-bold text-orange-400 tabular-nums">{m.homeSets} : {m.awaySets}</span>
+                        {m.isDnfResult && <span className="rounded-full bg-red-500/15 px-1.5 py-0.5 text-[9px] font-black tracking-wide text-red-300">DNF</span>}
+                      </span>
+                    ) : m.isPostponed ? (
                             <span className="text-[10px] font-semibold text-yellow-400 bg-yellow-400/10 px-2 py-0.5 rounded-full whitespace-nowrap">Odložen</span>
                           ) : (
                             <span className="text-[11px] font-semibold text-slate-500">vs</span>
@@ -665,7 +647,12 @@ function DvobojiTab({
                           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 bg-orange-500/15 text-orange-400">DOM</span>
                           <span className={`flex-1 text-xs truncate ${homeWon ? 'font-bold text-white' : 'text-slate-400'}`}>{homeN}</span>
                           <span className="shrink-0 text-sm font-bold tabular-nums text-slate-200 min-w-11 text-center">
-                            {isDone ? `${m.homeSets} : ${m.awaySets}` : <span className="text-slate-600 text-xs">vs</span>}
+                            {isDone ? (
+                              <span className="inline-flex flex-col items-center gap-0.5">
+                                <span>{m.homeSets} : {m.awaySets}</span>
+                                {m.isDnfResult && <span className="rounded-full bg-red-500/15 px-1.5 py-0.5 text-[9px] font-black tracking-wide text-red-300">DNF</span>}
+                              </span>
+                            ) : <span className="text-slate-600 text-xs">vs</span>}
                           </span>
                           <span className={`flex-1 text-xs truncate text-right ${awayWon ? 'font-bold text-white' : 'text-slate-400'}`}>{awayN}</span>
                           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 bg-indigo-500/15 text-indigo-400">GOS</span>
@@ -1039,7 +1026,6 @@ export default function SharePage() {
   const [dvobojiPlayerId, setDvobojiPlayerId] = useState<string>('');
   const [expandedPairs, setExpandedPairs] = useState<Set<string>>(new Set());
   const [activePhaseKey, setActivePhaseKey] = useState<string>('regular');
-  const [previousRankSnapshot, setPreviousRankSnapshot] = useState<RankSnapshot>({});
   const [refreshSpinKey, setRefreshSpinKey] = useState(0);
   const [pullDistance, setPullDistance] = useState(0);
   const [isPulling, setIsPulling] = useState(false);
@@ -1069,10 +1055,6 @@ export default function SharePage() {
       d.phases = d.phases ?? [];
       d.standings = d.standings ?? [];
       d.groups = d.groups ?? [];
-      const previousSnapshot = readRankSnapshot(token);
-      const nextSnapshot = buildRankSnapshot(d);
-      setPreviousRankSnapshot(previousSnapshot);
-      writeRankSnapshot(token, nextSnapshot);
       setData(d);
       setLastUpdated(new Date());
       setError('');
@@ -1164,9 +1146,9 @@ export default function SharePage() {
     : [];
 
   const activePhase = data?.phases?.find(p => p.id === activePhaseKey);
-  const regularMatchGroups = data?.isEuroleague ? [...data.groups].reverse() : data?.groups ?? [];
+  const regularMatchGroups = data?.isEuroleague ? orderEuroleagueMatchGroups(data.groups) : data?.groups ?? [];
   const activePhaseMatchGroups = activePhase && data?.isEuroleague && activePhase.type !== 'knockout'
-    ? [...activePhase.groups].reverse()
+    ? orderEuroleagueMatchGroups(activePhase.groups)
     : activePhase?.groups ?? [];
   const isKnockout = activePhaseKey !== 'regular' && activePhase?.type === 'knockout';
   const visibleTabs: InfoTab[] = isKnockout
@@ -1570,7 +1552,6 @@ export default function SharePage() {
                   {activeTab === 'tabela' && activePhase.type === 'round_robin' && (
                     <StandingsTable
                       standings={activePhase.standings}
-                      previousRanks={previousRankSnapshot[activePhase.id]}
                       highlightedPositions={
                         /baraž|baraz/i.test(activePhase.name)
                           ? [1, 2]
@@ -1600,7 +1581,7 @@ export default function SharePage() {
                       groups={activePhaseMatchGroups}
                       expandedGroups={expandedGroups}
                       toggleGroup={toggleGroup}
-                      groupLabel={(g) => activePhase.type === 'knockout' ? `Mečevi` : data.isEuroleague ? `Ligaški Dan ${g.label}` : `Kolo ${g.label}`}
+                      groupLabel={(g) => g.label === -1 ? 'Službeni DNF' : activePhase.type === 'knockout' ? `Mečevi` : data.isEuroleague ? `Ligaški Dan ${g.label}` : `Kolo ${g.label}`}
                     />
                   )}
                   {activeTab === 'dvoboji' && activePhase.type === 'round_robin' && (
@@ -1628,7 +1609,6 @@ export default function SharePage() {
                       highlightedPositions={[1, 2, 3, 4, 5, 6, 7, 8]}
                       highlightMode="qualified"
                       tableTone="zoned"
-                      previousRanks={previousRankSnapshot.regular}
                     />
                   )}
                   {activeTab === 'mecevi' && (
