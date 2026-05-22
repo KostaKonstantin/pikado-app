@@ -13,6 +13,7 @@ import { RankingsModule } from './rankings/rankings.module';
 import { LiveModule } from './live/live.module';
 import { InvitesModule } from './invites/invites.module';
 import { ShareModule } from './share/share.module';
+import { SchemaBootstrapService } from './schema-bootstrap.service';
 
 // Entities
 import { User } from './users/entities/user.entity';
@@ -62,5 +63,6 @@ import { ShareToken } from './share/entities/share-token.entity';
     InvitesModule,
     ShareModule,
   ],
+  providers: [SchemaBootstrapService],
 })
 export class AppModule {}
