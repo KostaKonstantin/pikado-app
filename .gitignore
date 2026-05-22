@@ -30,3 +30,9 @@ Thumbs.db
 
 # TypeScript
 *.tsbuildinfo
+
+# Claude Code / agent tooling
+.claude/
+.claude-flow/
+.mcp.json
+docs/

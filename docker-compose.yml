@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     container_name: pikado-db
     environment:
       POSTGRES_DB: pikado
@@ -27,7 +27,7 @@ services:
       JWT_EXPIRES_IN: 7d
       PORT: 3001
       CORS_ORIGINS: http://localhost:3002
-      NODE_ENV: production
+      NODE_ENV: development
     ports:
       - '3001:3001'
     restart: unless-stopped
