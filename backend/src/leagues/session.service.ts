@@ -4,6 +4,7 @@ import { Repository, IsNull } from 'typeorm';
 import { LeagueSession } from './entities/league-session.entity';
 import { LeagueMatch } from './entities/league-match.entity';
 import { League } from './entities/league.entity';
+import { CompetitionPhase } from './entities/competition-phase.entity';
 import { MatchStatus } from '../common/enums';
 
 @Injectable()
@@ -12,6 +13,7 @@ export class SessionService {
     @InjectRepository(LeagueSession) private sessionRepo: Repository<LeagueSession>,
     @InjectRepository(LeagueMatch)   private matchRepo:   Repository<LeagueMatch>,
     @InjectRepository(League)        private leagueRepo:  Repository<League>,
+    @InjectRepository(CompetitionPhase) private phaseRepo: Repository<CompetitionPhase>,
   ) {}
 
   // ─── Auth helper ─────────────────────────────────────────────────────────────
@@ -117,6 +119,19 @@ export class SessionService {
     return league.mode === 'euroleague' ? league.activePhaseId : null;
   }
 
+  private async getDnfPlayerIds(leagueId: string, phaseId?: string | null): Promise<Set<string>> {
+    if (!phaseId) return new Set();
+    const phase = await this.phaseRepo.findOne({ where: { id: phaseId, leagueId } });
+    return new Set(phase?.dnfPlayerIds ?? []);
+  }
+
+  private ensureNoDnfPlayers(playerIds: string[], dnfPlayerIds: Set<string>) {
+    const blocked = playerIds.filter((playerId) => dnfPlayerIds.has(playerId));
+    if (blocked.length > 0) {
+      throw new BadRequestException('DNF igrač ne može biti dodat u novi ligaški dan');
+    }
+  }
+
   // ─── Preview (no side effects) ───────────────────────────────────────────────
   async previewSession(
     clubId: string,
@@ -125,12 +140,15 @@ export class SessionService {
     maxMatchesPerPlayer = 1,
   ) {
     const league = await this.verifyLeague(clubId, leagueId);
+    const phaseId = this.activePhaseId(league);
+    const dnfPlayerIds = await this.getDnfPlayerIds(leagueId, phaseId);
+    this.ensureNoDnfPlayers(presentPlayerIds, dnfPlayerIds);
 
     if (presentPlayerIds.length < 2) {
       return { matches: [], presentCount: presentPlayerIds.length, matchCount: 0, poolSize: 0 };
     }
 
-    const pool = await this.getPool(leagueId, this.activePhaseId(league));
+    const pool = await this.getPool(leagueId, phaseId);
     const selected = this.selectMatches(pool, presentPlayerIds, maxMatchesPerPlayer);
 
     const matchesWithPlayers = await Promise.all(
@@ -165,6 +183,8 @@ export class SessionService {
 
     const { presentPlayerIds, maxMatchesPerPlayer = 1, sessionDate = null, manualMode = false } = body;
     const phaseId = this.activePhaseId(league);
+    const dnfPlayerIds = await this.getDnfPlayerIds(leagueId, phaseId);
+    this.ensureNoDnfPlayers(presentPlayerIds, dnfPlayerIds);
 
     // Next session number (per league)
     const last = await this.sessionRepo.findOne({
@@ -349,6 +369,8 @@ export class SessionService {
     // Load session to scope queries to the correct phase (EvroLiga support)
     const session = await this.sessionRepo.findOne({ where: { id: sessionId, leagueId } });
     const phaseId = session?.phaseId ?? null;
+    const dnfPlayerIds = await this.getDnfPlayerIds(leagueId, phaseId);
+    this.ensureNoDnfPlayers([homePlayerId, awayPlayerId], dnfPlayerIds);
 
     const w1: any = { leagueId, homePlayerId, awayPlayerId };
     const w2: any = { leagueId, homePlayerId: awayPlayerId, awayPlayerId: homePlayerId };
@@ -423,6 +445,8 @@ export class SessionService {
 
     // Scope all queries to the session's phase (EvroLiga support)
     const phaseId = session.phaseId ?? null;
+    const dnfPlayerIds = await this.getDnfPlayerIds(leagueId, phaseId);
+    this.ensureNoDnfPlayers([homePlayerId, awayPlayerId], dnfPlayerIds);
     const pool1: any = { leagueId, homePlayerId, awayPlayerId, sessionId: IsNull(), status: MatchStatus.PENDING };
     const pool2: any = { leagueId, homePlayerId: awayPlayerId, awayPlayerId: homePlayerId, sessionId: IsNull(), status: MatchStatus.PENDING };
     if (phaseId) { pool1.phaseId = phaseId; pool2.phaseId = phaseId; }

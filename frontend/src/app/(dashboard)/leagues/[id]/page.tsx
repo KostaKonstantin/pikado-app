@@ -295,6 +295,7 @@ export default function LeagueDetailPage() {
   const [deletingSession, setDeletingSession] = useState<string | null>(null);
   const [deleteSessionConfirm, setDeleteSessionConfirm] = useState<string | null>(null);
   const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
+  const [dnfMatchesExpanded, setDnfMatchesExpanded] = useState(false);
 
   // Mobile bottom action bar
   const [showMoreSheet, setShowMoreSheet]       = useState(false);
@@ -337,6 +338,11 @@ export default function LeagueDetailPage() {
   const [phaseHomeScore,   setPhaseHomeScore]   = useState(0);
   const [phaseAwayScore,   setPhaseAwayScore]   = useState(0);
   const [phaseSaveLoading, setPhaseSaveLoading] = useState(false);
+  const [dnfTarget, setDnfTarget] = useState<any | null>(null);
+  const [dnfReason, setDnfReason] = useState('');
+  const [dnfConfirmChecked, setDnfConfirmChecked] = useState(false);
+  const [dnfConfirmText, setDnfConfirmText] = useState('');
+  const [dnfSaving, setDnfSaving] = useState(false);
 
   // PDF download
   const [downloadingRound, setDownloadingRound]             = useState<number | null>(null);
@@ -407,8 +413,8 @@ export default function LeagueDetailPage() {
 
   /* ── session actions ─────────────────────────────────────── */
   const openNewSession = () => {
-    // Use phase-scoped players for EuroLeague, all players otherwise
-    setSessionPresent(new Set(sessionModalPlayers.map((lp: any) => lp.playerId)));
+    // Use phase-scoped active players for EuroLeague, all players otherwise.
+    setSessionPresent(new Set(sessionEligiblePlayers.map((lp: any) => lp.playerId)));
     setSessionMaxPer(1);
     setSessionDate('');
     setSessionPreview(null);
@@ -417,6 +423,7 @@ export default function LeagueDetailPage() {
   };
 
   const togglePresent = (playerId: string) => {
+    if (sessionDnfPlayerIds.has(playerId)) return;
     setSessionPresent((prev) => {
       const next = new Set(prev);
       if (next.has(playerId)) next.delete(playerId); else next.add(playerId);
@@ -820,6 +827,32 @@ export default function LeagueDetailPage() {
     finally { setWalkoverSaving(false); }
   };
 
+  const openDnfModal = (standing: any) => {
+    setDnfTarget(standing);
+    setDnfReason('');
+    setDnfConfirmChecked(false);
+    setDnfConfirmText('');
+  };
+
+  const closeDnfModal = () => {
+    setDnfTarget(null);
+    setDnfReason('');
+    setDnfConfirmChecked(false);
+    setDnfConfirmText('');
+  };
+
+  const confirmDnf = async () => {
+    if (!club?.id || !activePhaseView || !dnfTarget || dnfConfirmText.trim().toUpperCase() !== 'DNF' || !dnfConfirmChecked) return;
+    setDnfSaving(true);
+    try {
+      await leaguesApi.markPhasePlayerDnf(club.id, id, activePhaseView, dnfTarget.playerId, dnfReason.trim() || undefined);
+      closeDnfModal();
+      await loadPhaseData(activePhaseView);
+    } finally {
+      setDnfSaving(false);
+    }
+  };
+
   const savePostpone = async () => {
     if (!postponeMatch || !club?.id) return;
     setPostponeSaving(true);
@@ -847,6 +880,9 @@ export default function LeagueDetailPage() {
         (phases.find((p: any) => p.id === activePhaseView)?.playerIds ?? []).includes(lp.playerId)
       )
     : lPlayers;
+  const activePhaseMeta = activePhaseView ? phases.find((p: any) => p.id === activePhaseView) : null;
+  const sessionDnfPlayerIds = new Set<string>(activePhaseMeta?.dnfPlayerIds ?? []);
+  const sessionEligiblePlayers = sessionModalPlayers.filter((lp: any) => !sessionDnfPlayerIds.has(lp.playerId));
 
   // Computed for sticky mobile action bar
   const activeSessionForBar = sessions.find((s: any) => s.status === 'open');
@@ -1210,7 +1246,7 @@ export default function LeagueDetailPage() {
                                   <Avatar name={s.player?.fullName} player={s.player} winRate={winRate(s)} rank={s.position} />
                                   <div className="min-w-0">
                                     <div className="flex items-center gap-1.5">
-                                      <span className="font-semibold text-white text-sm truncate">{s.player?.fullName}</span>
+                                      <span className="font-semibold text-sm truncate text-white">{s.player?.fullName}</span>
                                       {s.position === 1 && <Trophy className="w-3 h-3 text-yellow-400 shrink-0" />}
                                     </div>
                                     <div className="flex items-center gap-1.5 mt-0.5">
@@ -1260,7 +1296,7 @@ export default function LeagueDetailPage() {
                             <Avatar name={s.player?.fullName} player={s.player} rank={s.position} />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-1.5">
-                                <span className="font-semibold text-white text-sm truncate">{s.player?.fullName}</span>
+                                <span className="font-semibold text-sm truncate text-white">{s.player?.fullName}</span>
                                 {s.position === 1 && <Trophy className="w-3 h-3 text-yellow-400 shrink-0" />}
                               </div>
                               <div className="flex items-center gap-2.5 mt-1">
@@ -2448,8 +2484,8 @@ export default function LeagueDetailPage() {
             {(() => {
               const presentIds: string[] = manualMatchSession?.presentPlayerIds ?? [];
               const manualPlayers = presentIds.length > 0
-                ? sessionModalPlayers.filter((lp: any) => presentIds.includes(lp.playerId))
-                : sessionModalPlayers;
+                ? sessionEligiblePlayers.filter((lp: any) => presentIds.includes(lp.playerId))
+                : sessionEligiblePlayers;
               return (
                 <>
                   <div>
@@ -2693,9 +2729,12 @@ export default function LeagueDetailPage() {
               {/* Player selection */}
               <div className="mb-4">
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs text-slate-400">Prisutni igrači ({sessionPresent.size}/{sessionModalPlayers.length})</label>
+                  <label className="text-xs text-slate-400">
+                    Prisutni igrači ({sessionPresent.size}/{sessionEligiblePlayers.length})
+                    {sessionDnfPlayerIds.size > 0 && <span className="ml-1 text-red-300">· {sessionDnfPlayerIds.size} DNF</span>}
+                  </label>
                   <div className="flex gap-2">
-                    <button onClick={() => { setSessionPresent(new Set(sessionModalPlayers.map((lp: any) => lp.playerId))); setSessionPreview(null); }} className="text-xs text-slate-400 hover:text-white">Svi</button>
+                    <button onClick={() => { setSessionPresent(new Set(sessionEligiblePlayers.map((lp: any) => lp.playerId))); setSessionPreview(null); }} className="text-xs text-slate-400 hover:text-white">Svi</button>
                     <span className="text-slate-700">·</span>
                     <button onClick={() => { setSessionPresent(new Set()); setSessionPreview(null); }} className="text-xs text-slate-400 hover:text-white">Nijedan</button>
                   </div>
@@ -2703,26 +2742,35 @@ export default function LeagueDetailPage() {
                 <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
                   {sessionModalPlayers.map((lp: any) => {
                     const present = sessionPresent.has(lp.playerId);
+                    const isDnf = sessionDnfPlayerIds.has(lp.playerId);
                     return (
                       <label
                         key={lp.playerId}
-                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-all ${
-                          present ? 'border-orange-500/50 bg-orange-500/8' : 'border-slate-700 hover:border-slate-600'
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all ${
+                          isDnf
+                            ? 'cursor-not-allowed border-red-500/20 bg-red-500/5 opacity-65'
+                            : present ? 'cursor-pointer border-orange-500/50 bg-orange-500/8' : 'cursor-pointer border-slate-700 hover:border-slate-600'
                         }`}
                       >
                         <input
                           type="checkbox"
                           checked={present}
                           onChange={() => togglePresent(lp.playerId)}
+                          disabled={isDnf}
                           className="sr-only"
                         />
                         <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
-                          present ? 'border-orange-500 bg-orange-500' : 'border-slate-600'
+                          isDnf ? 'border-red-400/40 bg-red-500/10' : present ? 'border-orange-500 bg-orange-500' : 'border-slate-600'
                         }`}>
                           {present && <CheckCircle2 className="w-3 h-3 text-white" />}
                         </div>
                         <Avatar name={lp.player?.fullName} player={lp.player} size="sm" />
-                        <span className="text-sm text-white font-medium flex-1">{lp.player?.fullName}</span>
+                        <span className={`text-sm font-medium flex-1 ${isDnf ? 'text-slate-500 line-through decoration-red-400/70' : 'text-white'}`}>{lp.player?.fullName}</span>
+                        {isDnf && (
+                          <span className="rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[9px] font-black tracking-[0.12em] text-red-300">
+                            DNF
+                          </span>
+                        )}
                       </label>
                     );
                   })}
@@ -3388,6 +3436,85 @@ export default function LeagueDetailPage() {
         </Modal>
       )}
 
+      {/* ══ MODAL: DNF igrača ═══════════════════════════════════ */}
+      {dnfTarget && (() => {
+        const activePhase = phases.find((p: any) => p.id === activePhaseView);
+        const expectedLosses = Math.max(((activePhase?.playerIds?.length ?? 1) - 1) * 2, 0);
+        const canConfirmDnf = dnfConfirmChecked && dnfConfirmText.trim().toUpperCase() === 'DNF' && !dnfSaving;
+
+        return (
+          <Modal onClose={closeDnfModal} wide>
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <h3 className="font-semibold text-white flex items-center gap-2">
+                  <Ban className="w-4 h-4 text-red-400" />
+                  Označi igrača kao DNF
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">EvroLiga · {activePhase?.name ?? 'Faza'}</p>
+              </div>
+              <button onClick={closeDnfModal} className="p-1 text-slate-400 hover:text-white rounded-lg transition-colors"><X className="w-5 h-5" /></button>
+            </div>
+
+            <div className="rounded-2xl border border-red-500/25 bg-red-500/10 p-4 mb-4">
+              <p className="text-sm font-bold text-white">{dnfTarget.player?.fullName}</p>
+              <p className="text-xs leading-5 text-red-200/85 mt-2">
+                Svi mečevi ovog igrača u ovoj fazi biće upisani kao službeni porazi 0:4.
+                Postojeći rezultati se prepisuju, a nedostajući mečevi se automatski kreiraju.
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="rounded-xl bg-slate-950/45 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wide text-slate-500">Službeni porazi</p>
+                  <p className="text-lg font-black text-red-300 tabular-nums">{expectedLosses}</p>
+                </div>
+                <div className="rounded-xl bg-slate-950/45 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wide text-slate-500">Rezultat</p>
+                  <p className="text-lg font-black text-orange-300">0:4</p>
+                </div>
+              </div>
+            </div>
+
+            <label className="block mb-3">
+              <span className="text-xs font-medium text-slate-400">Razlog (opciono)</span>
+              <input
+                value={dnfReason}
+                onChange={(e) => setDnfReason(e.target.value)}
+                placeholder="npr. napustio ligu"
+                className="input-field mt-1.5 text-sm"
+              />
+            </label>
+
+            <label className="flex items-start gap-3 rounded-xl border border-slate-700 bg-slate-900/70 p-3 mb-3">
+              <input
+                type="checkbox"
+                checked={dnfConfirmChecked}
+                onChange={(e) => setDnfConfirmChecked(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span className="text-xs leading-5 text-slate-300">
+                Razumem da se ova akcija primenjuje na celu fazu i menja postojeće rezultate tog igrača.
+              </span>
+            </label>
+
+            <label className="block mb-5">
+              <span className="text-xs font-medium text-slate-400">Za potvrdu ukucaj DNF</span>
+              <input
+                value={dnfConfirmText}
+                onChange={(e) => setDnfConfirmText(e.target.value)}
+                className="input-field mt-1.5 text-sm font-bold tracking-[0.18em] uppercase"
+                placeholder="DNF"
+              />
+            </label>
+
+            <div className="flex gap-2">
+              <button onClick={confirmDnf} disabled={!canConfirmDnf} className="flex-1 justify-center text-sm rounded-xl font-bold bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 transition-all disabled:opacity-40 disabled:hover:bg-red-500/15">
+                {dnfSaving ? 'Primena...' : 'Potvrdi DNF'}
+              </button>
+              <button onClick={closeDnfModal} className="btn-secondary flex-1 justify-center text-sm">Otkaži</button>
+            </div>
+          </Modal>
+        );
+      })()}
+
       {/* ══ MODAL: Odloži Meč ══════════════════════════════════ */}
       {postponeMatch && (
         <Modal onClose={() => setPostponeMatch(null)} wide>
@@ -3913,8 +4040,9 @@ export default function LeagueDetailPage() {
                                   <Avatar name={s.player?.fullName} player={s.player} winRate={phaseWinRate(s)} rank={s.position} />
                                   <div className="min-w-0">
                                     <div className="flex items-center gap-1.5">
-                                      <span className="font-semibold text-white text-sm truncate">{s.player?.fullName}</span>
+                                      <span className={`font-semibold text-sm truncate ${s.isDnf ? 'text-slate-400 line-through decoration-red-400/70' : 'text-white'}`}>{s.player?.fullName}</span>
                                       {s.position === 1 && <Trophy className="w-3 h-3 text-yellow-400 shrink-0" />}
+                                      {s.isDnf && <span className="rounded-full border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-[9px] font-black tracking-[0.12em] text-red-300">DNF</span>}
                                     </div>
                                     <div className="flex items-center gap-1.5 mt-0.5">
                                       <div className="h-1 w-12 rounded-full overflow-hidden progress-track">
@@ -3933,7 +4061,20 @@ export default function LeagueDetailPage() {
                               <td className="px-4 py-3 text-slate-300 tabular-nums">{s.setsFor}</td>
                               <td className="px-4 py-3 text-slate-500 tabular-nums">{s.setsAgainst}</td>
                               <td className="px-4 py-3">
-                                <span className="text-lg font-black text-orange-400 tabular-nums leading-none">{s.points}</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-lg font-black text-orange-400 tabular-nums leading-none">{s.points}</span>
+                                  {canEdit && !s.isDnf && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); openDnfModal(s); }}
+                                      className="inline-flex items-center gap-1 rounded-lg border border-red-500/25 bg-red-500/10 px-2 py-1 text-[10px] font-bold text-red-300 transition hover:border-red-400/40 hover:bg-red-500/20 hover:text-red-200"
+                                      title="Označi igrača kao DNF"
+                                    >
+                                      <Ban className="h-3 w-3" />
+                                      DNF
+                                    </button>
+                                  )}
+                                </div>
                               </td>
                             </tr>
                           ))}
@@ -3953,8 +4094,9 @@ export default function LeagueDetailPage() {
                             <Avatar name={s.player?.fullName} player={s.player} rank={s.position} />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-1.5">
-                                <span className="font-semibold text-white text-sm truncate">{s.player?.fullName}</span>
+                                <span className={`font-semibold text-sm truncate ${s.isDnf ? 'text-slate-400 line-through decoration-red-400/70' : 'text-white'}`}>{s.player?.fullName}</span>
                                 {s.position === 1 && <Trophy className="w-3 h-3 text-yellow-400 shrink-0" />}
+                                {s.isDnf && <span className="rounded-full border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-[9px] font-black tracking-[0.12em] text-red-300">DNF</span>}
                               </div>
                               <div className="flex items-center gap-2.5 mt-1">
                                 <span className="text-[11px] font-medium text-green-400">{s.wins}P</span>
@@ -3974,6 +4116,16 @@ export default function LeagueDetailPage() {
                             <div className="text-right shrink-0">
                               <span className="text-2xl font-black text-orange-400 tabular-nums leading-none">{s.points}</span>
                               <p className="text-[10px] text-slate-500 mt-0.5">bodova</p>
+                              {canEdit && !s.isDnf && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); openDnfModal(s); }}
+                                  className="mt-2 inline-flex items-center gap-1 rounded-lg border border-red-500/25 bg-red-500/10 px-2 py-1 text-[10px] font-bold text-red-300 transition active:scale-95"
+                                >
+                                  <Ban className="h-3 w-3" />
+                                  DNF
+                                </button>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -4002,6 +4154,7 @@ export default function LeagueDetailPage() {
               const pendingInPool   = phaseFixtures.filter((m: any) => m.status === 'pending' && !m.sessionId).length;
               const activeSession   = sessions.find((s: any) => s.status === 'open');
               const closedSessions  = sessions.filter((s: any) => s.status !== 'open');
+              const dnfAutoMatches  = phaseFixtures.filter((m: any) => m.isDnfResult && !m.sessionId);
               const totalInSessions = sessions.reduce((a: number, s: any) => a + (s.matchCount || 0), 0);
               const completedTotal  = sessions.reduce((a: number, s: any) => a + (s.completedCount || 0), 0);
               const pct = totalInSessions > 0 ? Math.round((completedTotal / totalInSessions) * 100) : 0;
@@ -4197,8 +4350,9 @@ export default function LeagueDetailPage() {
                                     </div>
                                     <div className="w-14 text-center shrink-0">
                                       {completed ? (
-                                        <span className={`text-sm font-bold tabular-nums px-1.5 py-0.5 rounded-lg ${isDraw ? 'text-yellow-400 bg-yellow-500/10' : homeWon ? 'text-green-400 bg-green-500/10' : 'text-red-400 bg-red-500/10'}`}>
-                                          {m.homeSets}:{m.awaySets}
+                                        <span className={`inline-flex flex-col items-center gap-0.5 text-sm font-bold tabular-nums px-1.5 py-0.5 rounded-lg ${m.isDnfResult ? 'text-red-300 bg-red-500/10' : isDraw ? 'text-yellow-400 bg-yellow-500/10' : homeWon ? 'text-green-400 bg-green-500/10' : 'text-red-400 bg-red-500/10'}`}>
+                                          <span>{m.homeSets}:{m.awaySets}</span>
+                                          {m.isDnfResult && <span className="text-[8px] font-black tracking-wide">DNF</span>}
                                         </span>
                                       ) : (
                                         <span className="text-[11px] text-slate-600 font-bold tracking-wider">vs</span>
@@ -4218,7 +4372,7 @@ export default function LeagueDetailPage() {
                                           Unesi
                                         </button>
                                       )}
-                                      {canEdit && completed && (
+                                      {canEdit && completed && !m.isDnfResult && (
                                         <button
                                           onClick={() => { setPhaseMatchModal(m); setPhaseHomeScore(m.homeSets ?? 0); setPhaseAwayScore(m.awaySets ?? 0); }}
                                           className="text-[11px] px-2 py-1 text-slate-600 hover:text-slate-300 rounded-lg transition-colors">
@@ -4343,8 +4497,9 @@ export default function LeagueDetailPage() {
                                             </div>
                                             <div className="w-14 text-center shrink-0">
                                               {completed ? (
-                                                <span className={`text-sm font-bold tabular-nums px-1.5 py-0.5 rounded ${isDraw ? 'text-yellow-400' : homeWon ? 'text-green-400' : 'text-red-400'}`}>
-                                                  {m.homeSets}:{m.awaySets}
+                                                <span className={`inline-flex flex-col items-center gap-0.5 text-sm font-bold tabular-nums px-1.5 py-0.5 rounded ${m.isDnfResult ? 'text-red-300 bg-red-500/10' : isDraw ? 'text-yellow-400' : homeWon ? 'text-green-400' : 'text-red-400'}`}>
+                                                  <span>{m.homeSets}:{m.awaySets}</span>
+                                                  {m.isDnfResult && <span className="text-[8px] font-black tracking-wide">DNF</span>}
                                                 </span>
                                               ) : (
                                                 <span className="text-xs text-slate-600 font-medium">vs</span>
@@ -4357,7 +4512,7 @@ export default function LeagueDetailPage() {
                                               </span>
                                             </div>
                                             <div className="flex items-center gap-1 shrink-0">
-                                              {canEdit && completed && !m.isWalkover && (
+                                              {canEdit && completed && !m.isWalkover && !m.isDnfResult && (
                                                 <button
                                                   onClick={() => { setPhaseMatchModal(m); setPhaseHomeScore(m.homeSets ?? 0); setPhaseAwayScore(m.awaySets ?? 0); }}
                                                   className="text-[11px] px-2 py-1 text-slate-600 hover:text-slate-300 rounded-lg transition-colors">
@@ -4378,6 +4533,43 @@ export default function LeagueDetailPage() {
                           );
                         })}
                       </div>
+                    </div>
+                  )}
+                  {dnfAutoMatches.length > 0 && (
+                    <div className="card overflow-hidden border-red-500/20">
+                      <button
+                        type="button"
+                        onClick={() => setDnfMatchesExpanded((prev) => !prev)}
+                        className={`flex w-full items-center justify-between gap-3 px-4 py-3 bg-red-500/5 text-left transition-colors hover:bg-red-500/10 ${dnfMatchesExpanded ? 'border-b border-red-500/15' : ''}`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Ban className="h-4 w-4 shrink-0 text-red-300" />
+                          <span className="text-sm font-bold text-white">Službeni DNF mečevi</span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-xs font-semibold text-red-300 tabular-nums">{dnfAutoMatches.length}</span>
+                          <ChevronDown className={`h-4 w-4 text-red-300 transition-transform ${dnfMatchesExpanded ? 'rotate-180' : ''}`} />
+                        </div>
+                      </button>
+                      {dnfMatchesExpanded && (
+                        <div className="divide-y divide-slate-700/20">
+                          {dnfAutoMatches.map((m: any, idx: number) => {
+                            const homeWon = m.homeSets > m.awaySets;
+                            const awayWon = m.awaySets > m.homeSets;
+                            return (
+                              <div key={m.id} className="flex items-center px-4 py-2.5 gap-2">
+                                <span className="text-[10px] text-slate-700 w-4 shrink-0 tabular-nums text-center">{idx + 1}</span>
+                                <span className={`flex-1 truncate text-right text-sm font-medium ${homeWon ? 'text-green-400' : 'text-slate-500'}`}>{m.homePlayer?.fullName}</span>
+                                <span className="inline-flex w-16 shrink-0 flex-col items-center rounded-lg bg-red-500/10 px-1.5 py-0.5 text-sm font-bold tabular-nums text-red-300">
+                                  <span>{m.homeSets}:{m.awaySets}</span>
+                                  <span className="text-[8px] font-black tracking-wide">DNF</span>
+                                </span>
+                                <span className={`flex-1 truncate text-sm font-medium ${awayWon ? 'text-green-400' : 'text-slate-500'}`}>{m.awayPlayer?.fullName}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -4452,7 +4644,10 @@ export default function LeagueDetailPage() {
                           >
                             <Avatar name={lp.player?.fullName} player={lp.player} size="lg" />
                             <div className="w-full min-w-0">
-                              <p className="text-sm font-semibold text-white leading-tight truncate">{lp.player?.fullName}</p>
+                              <div className="flex items-center justify-center gap-1.5">
+                                <p className={`min-w-0 truncate text-sm font-semibold leading-tight ${standing?.isDnf ? 'text-slate-400 line-through decoration-red-400/70' : 'text-white'}`}>{lp.player?.fullName}</p>
+                                {standing?.isDnf && <span className="rounded-full border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-[9px] font-black tracking-[0.12em] text-red-300">DNF</span>}
+                              </div>
                               {standing ? (
                                 <p className="text-xs text-slate-400 mt-1">
                                   <span className="text-orange-400 font-bold">{standing.points}</span> bod.
@@ -4539,6 +4734,7 @@ export default function LeagueDetailPage() {
                 if (cell.status === 'not_played')      { bg = 'rgba(15,23,42,0.7)';       border = '1px dashed rgba(71,85,105,0.55)'; label = ''; }
                 else if (cell.status === 'upcoming')   { bg = 'rgba(99,102,241,0.12)';    border = '1px solid rgba(99,102,241,0.28)'; label = '⏳'; }
                 else if (cell.status === 'partial')    { bg = 'rgba(245,158,11,0.14)';    border = '1px solid rgba(245,158,11,0.32)'; label = `${cell.completed.length}/${expectedPerPair}`; }
+                else if (cell.completed.some((m: any) => m.isDnfResult)) { bg = 'rgba(239,68,68,0.13)'; border = '1px solid rgba(239,68,68,0.34)'; label = 'DNF'; }
                 else                                   { bg = 'rgba(34,197,94,0.14)';     border = '1px solid rgba(34,197,94,0.3)';  label = '✓'; }
                 const aName = sortedPlayers.find((p: any) => p.playerId === aId)?.player?.fullName || '';
                 const bName = sortedPlayers.find((p: any) => p.playerId === bId)?.player?.fullName || '';
@@ -4546,6 +4742,7 @@ export default function LeagueDetailPage() {
                 return (
                   <button onClick={() => setMatrixCell({ aId, bId })} title={`${aName} vs ${bName} · ${tipMap[cell.status]}`}
                     className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 cursor-pointer transition-all duration-150 hover:brightness-125 hover:scale-110 active:scale-95 ${
+                      cell.status === 'completed' && cell.completed.some((m: any) => m.isDnfResult) ? 'text-red-300 text-[9px] font-black' :
                       cell.status === 'completed' ? 'text-emerald-400 text-xs font-bold' :
                       cell.status === 'partial'   ? 'text-amber-400 text-[10px] font-bold' :
                       cell.status === 'upcoming'  ? 'text-indigo-400 text-[10px]' : 'text-slate-700 text-xs'
@@ -4587,7 +4784,7 @@ export default function LeagueDetailPage() {
                     <div className="rounded-xl overflow-hidden" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
                       <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
                         <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">R{m.roundNumber || 1}</span>
-                        {done && <span className={`badge text-[10px] ${aWon ? 'badge-win' : bWon ? 'badge-loss' : 'badge-draw'}`}>{aWon ? 'Pobeda A' : bWon ? 'Pobeda B' : 'Remi'}</span>}
+                        {done && <span className={`badge text-[10px] ${m.isDnfResult ? 'bg-red-500/15 text-red-300 border border-red-500/25' : aWon ? 'badge-win' : bWon ? 'badge-loss' : 'badge-draw'}`}>{m.isDnfResult ? 'DNF' : aWon ? 'Pobeda A' : bWon ? 'Pobeda B' : 'Remi'}</span>}
                       </div>
                       <div className="flex items-center gap-2 px-3 pb-3">
                         <div className="flex-1 flex items-center gap-2 min-w-0">

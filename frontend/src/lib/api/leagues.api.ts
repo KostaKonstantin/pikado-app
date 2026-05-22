@@ -107,6 +107,9 @@ export const leaguesApi = {
   updatePhaseMatch: (clubId: string, leagueId: string, phaseId: string, matchId: string, homeSets: number, awaySets: number) =>
     api.patch(`/clubs/${clubId}/leagues/${leagueId}/phases/${phaseId}/matches/${matchId}`, { homeSets, awaySets }).then((r) => r.data),
 
+  markPhasePlayerDnf: (clubId: string, leagueId: string, phaseId: string, playerId: string, reason?: string) =>
+    api.post(`/clubs/${clubId}/leagues/${leagueId}/phases/${phaseId}/players/${playerId}/dnf`, { reason }).then((r) => r.data),
+
   advancePhase: (clubId: string, leagueId: string) =>
     api.post(`/clubs/${clubId}/leagues/${leagueId}/phases/advance`).then((r) => r.data),
 };

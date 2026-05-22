@@ -38,6 +38,14 @@ export class CompetitionPhase {
   @Column({ type: 'jsonb', default: [], name: 'player_ids' })
   playerIds: string[];
 
+  /** Player IDs marked as DNF in this phase */
+  @Column({ type: 'jsonb', default: [], name: 'dnf_player_ids' })
+  dnfPlayerIds: string[];
+
+  /** Lightweight audit metadata for DNF actions in this phase */
+  @Column({ type: 'jsonb', default: [], name: 'dnf_records' })
+  dnfRecords: { playerId: string; reason?: string | null; appliedAt: string }[];
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
