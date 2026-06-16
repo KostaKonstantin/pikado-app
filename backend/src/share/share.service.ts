@@ -10,9 +10,24 @@ import { LeagueSession } from '../leagues/entities/league-session.entity';
 import { CompetitionPhase } from '../leagues/entities/competition-phase.entity';
 import { Player } from '../players/entities/player.entity';
 import { MatchStatus } from '../common/enums';
+import { buildPlayerForm, winPercent } from './player-form';
 
 @Injectable()
 export class ShareService {
+  /**
+   * In-memory cache for public share payloads, keyed by token.
+   *
+   * The /share/:token endpoint is hit not only by human visitors but by
+   * link-preview crawlers (WhatsApp/Viber/Messenger/Facebook) that re-fetch
+   * the OG image repeatedly. Without a cache each hit triggers the full
+   * (query-heavy) getByToken read against the database — which is what burns
+   * Neon's network-transfer (egress) allowance. A short TTL collapses bursts
+   * of identical reads into a single DB query while keeping standings fresh
+   * enough for a public table (admins manually refresh anyway).
+   */
+  private cache = new Map<string, { data: any; expires: number }>();
+  private static readonly CACHE_TTL_MS = 30_000;
+
   constructor(
     @InjectRepository(ShareToken) private tokenRepo: Repository<ShareToken>,
     @InjectRepository(League) private leagueRepo: Repository<League>,
@@ -60,12 +75,14 @@ export class ShareService {
     rankMovements: Record<string, { previousPosition: number; currentPosition: number; delta: number }> = {},
   ) {
     const statsMap = new Map<string, any>();
+    const playerMatches = new Map<string, LeagueMatch[]>();
     for (const p of players) {
       statsMap.set(p.id, {
         player: { id: p.id, fullName: p.fullName },
         played: 0, won: 0, lost: 0, drawn: 0,
         setsFor: 0, setsAgainst: 0, points: 0,
       });
+      playerMatches.set(p.id, []);
     }
 
     const h2hPoints = new Map<string, number>();
@@ -73,6 +90,8 @@ export class ShareService {
       const home = statsMap.get(m.homePlayerId!);
       const away = statsMap.get(m.awayPlayerId!);
       if (!home || !away) continue;
+      playerMatches.get(m.homePlayerId!)!.push(m);
+      playerMatches.get(m.awayPlayerId!)!.push(m);
       home.played++; away.played++;
       home.setsFor += m.homeSets; home.setsAgainst += m.awaySets;
       away.setsFor += m.awaySets; away.setsAgainst += m.homeSets;
@@ -124,10 +143,18 @@ export class ShareService {
       })
       .map((s, i) => {
         const movement = rankMovements[s.player.id];
+        const isDnf = dnfPlayerIds.has(s.player.id);
+        // DNF records are administratively zeroed, so suppress their form/streak.
+        const { form, streak } = isDnf
+          ? { form: [], streak: null }
+          : buildPlayerForm(s.player.id, playerMatches.get(s.player.id) ?? []);
         return {
           position: i + 1,
           ...s,
-          isDnf: dnfPlayerIds.has(s.player.id),
+          isDnf,
+          winPct: winPercent(s.won, s.played),
+          form,
+          streak,
           previousPosition: movement?.previousPosition ?? null,
           rankDelta: movement?.delta ?? 0,
         };
@@ -135,6 +162,27 @@ export class ShareService {
   }
 
   async getByToken(token: string) {
+    const cached = this.cache.get(token);
+    if (cached && cached.expires > Date.now()) {
+      return cached.data;
+    }
+
+    const data = await this.buildShareData(token);
+    this.cache.set(token, { data, expires: Date.now() + ShareService.CACHE_TTL_MS });
+    return data;
+  }
+
+  /**
+   * Clears the whole share cache. Called by ShareCacheSubscriber whenever any
+   * share-relevant row changes, so an admin's edit (result, DNF, reschedule…)
+   * is reflected on the public page on the very next request — no staleness.
+   * The cache only ever holds a handful of tokens, so clearing all is cheap.
+   */
+  invalidateAll() {
+    this.cache.clear();
+  }
+
+  private async buildShareData(token: string) {
     const record = await this.tokenRepo.findOne({ where: { token } });
     if (!record) throw new NotFoundException('Link nije validan');
 

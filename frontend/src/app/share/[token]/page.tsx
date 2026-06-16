@@ -1,14 +1,16 @@
 'use client';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
-import { RefreshCw, Trophy, Calendar, CheckCircle2, Clock, ChevronDown, ChevronUp, Users, Copy, Check, QrCode, Share2, HelpCircle, X } from 'lucide-react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { RefreshCw, Trophy, Calendar, CheckCircle2, Clock, ChevronDown, ChevronUp, Users, Copy, Check, QrCode, Share2, HelpCircle, X, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import QRCode from 'react-qr-code';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3099').replace(/\/$/, '');
 
 /* ── Types ──────────────────────────────────────────────────────────── */
 type Player = { id: string; fullName: string };
+
+type Outcome = 'W' | 'D' | 'L';
 
 type StandingRow = {
   position: number;
@@ -18,6 +20,9 @@ type StandingRow = {
   isDnf?: boolean;
   previousPosition?: number | null;
   rankDelta?: number;
+  winPct?: number;
+  form?: Outcome[];
+  streak?: { type: Outcome; count: number } | null;
 };
 
 type MatchRow = {
@@ -151,6 +156,100 @@ type ZoneConfig = {
   advanceLabel?: string;
 };
 
+/* Outcome → table-consistent color language + Serbian initial (P/R/G).
+   Letter inside each dot satisfies "don't rely on color alone". */
+const FORM_META: Record<Outcome, { letter: string; label: string; bg: string; fg: string }> = {
+  W: { letter: 'P', label: 'Pobeda', bg: '#4ade80', fg: '#06210f' },
+  D: { letter: 'R', label: 'Remi',   bg: '#facc15', fg: '#2a2102' },
+  L: { letter: 'G', label: 'Poraz',  bg: '#f87171', fg: '#2a0707' },
+};
+
+function streakLabel(type: Outcome, count: number) {
+  if (type === 'L') return `${count} poraza u nizu`;
+  if (type === 'D') return `${count} remija u nizu`;
+  // "pobeda" (feminine): 2–4 → "pobede", else → "pobeda"
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  const few = mod10 >= 2 && mod10 <= 4 && !(mod100 >= 12 && mod100 <= 14);
+  return `${count} ${few ? 'pobede' : 'pobeda'} u nizu`;
+}
+
+function FormDots({ form }: { form: Outcome[] }) {
+  return (
+    <div className="flex items-center gap-1.5" role="list" aria-label="Poslednji mečevi">
+      {form.map((o, i) => {
+        const meta = FORM_META[o];
+        return (
+          <span
+            key={i}
+            role="listitem"
+            aria-label={meta.label}
+            title={meta.label}
+            className="inline-flex h-6 w-6 items-center justify-center rounded-lg text-[11px] font-black tabular-nums"
+            style={{ background: meta.bg, color: meta.fg }}
+          >
+            {meta.letter}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function PlayerStatsPanel({
+  id,
+  winPct,
+  form,
+  streak,
+}: {
+  id: string;
+  winPct: number;
+  form: Outcome[];
+  streak: { type: Outcome; count: number } | null;
+}) {
+  const showStreak = !!streak && streak.count >= 2;
+  const streakColor =
+    streak?.type === 'W' ? { color: '#4ade80', bg: 'rgba(74,222,128,0.1)', border: 'rgba(74,222,128,0.25)' } :
+    streak?.type === 'L' ? { color: '#f87171', bg: 'rgba(248,113,113,0.1)', border: 'rgba(248,113,113,0.25)' } :
+                           { color: '#cbd5e1', bg: 'rgba(148,163,184,0.12)', border: 'rgba(148,163,184,0.25)' };
+  const StreakIcon = streak?.type === 'W' ? TrendingUp : streak?.type === 'L' ? TrendingDown : Minus;
+
+  return (
+    <div id={id} className="border-t border-slate-700/40 bg-slate-900/55 px-3 sm:px-4 py-3.5">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Pobede</p>
+          <p className="mt-0.5 text-2xl font-black tabular-nums text-orange-400 leading-none">{winPct}%</p>
+        </div>
+
+        <div className="min-w-0">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Forma</p>
+            <span className="text-[9px] text-slate-600">najstarije → najnovije</span>
+          </div>
+          <div className="mt-1">
+            {form.length > 0
+              ? <FormDots form={form} />
+              : <span className="text-xs text-slate-500">Nema završenih mečeva</span>}
+          </div>
+        </div>
+      </div>
+
+      {showStreak && streak && (
+        <div className="mt-3">
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold"
+            style={{ color: streakColor.color, background: streakColor.bg, borderColor: streakColor.border }}
+          >
+            <StreakIcon className="h-3.5 w-3.5" />
+            {streakLabel(streak.type, streak.count)}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StandingsTable({
   standings,
   zones,
@@ -166,6 +265,13 @@ function StandingsTable({
   highlightLabel?: string;
   tableTone?: 'zoned' | 'regular' | 'baraz' | 'top10';
 }) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const reduceMotion = useReducedMotion();
+  const toggleExpanded = (id: string) => setExpanded((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   return (
     <div className="rounded-2xl overflow-hidden shadow-2xl border border-slate-700/70">
       <div className="flex items-center bg-slate-800/90 px-3 sm:px-4 h-9 border-b border-slate-700/60">
@@ -177,6 +283,7 @@ function StandingsTable({
           <span className="w-7 text-center text-[10px] font-semibold text-yellow-500/80 uppercase tracking-wider">R</span>
           <span className="w-7 text-center text-[10px] font-semibold text-red-500/80 uppercase tracking-wider">G</span>
           <span className="w-10 text-right text-[10px] font-semibold text-orange-400 uppercase tracking-wider">Bod</span>
+          <span className="w-5 shrink-0" aria-hidden="true" />
         </div>
       </div>
       {standings.length === 0 && (
@@ -304,6 +411,11 @@ function StandingsTable({
           s.position === ispadanjeBoundary && !inAdvance && !inBaraz ? { label: 'Ispadanje', color: '#f43f5e', border: 'rgba(244,63,94,0.35)' } :
           null;
 
+        const playerId = s.player?.id ?? null;
+        const isExpandable = !!playerId && !s.isDnf && (s.form?.length ?? 0) > 0;
+        const panelId = playerId ? `stats-${playerId}` : undefined;
+        const isOpen = !!playerId && expanded.has(playerId);
+
         return (
           <div key={s.player?.id ?? idx}>
             {zoneSeparator && (
@@ -315,11 +427,19 @@ function StandingsTable({
             )}
           <motion.div
             key={`row-${s.player?.id ?? idx}`}
-            className={`relative flex items-start px-3 sm:px-4 py-3 border-b border-slate-700/25 last:border-0 ${rowTone}`}
+            className={`relative flex items-start px-3 sm:px-4 py-3 border-b border-slate-700/25 last:border-0 ${rowTone} ${isExpandable ? 'cursor-pointer' : ''}`}
             style={rowStyle}
             initial={{ opacity: 0, x: -18 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.35, delay: rowDelay, ease: 'easeOut' }}
+            onClick={isExpandable && playerId ? () => toggleExpanded(playerId) : undefined}
+            onKeyDown={isExpandable && playerId ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpanded(playerId); }
+            } : undefined}
+            role={isExpandable ? 'button' : undefined}
+            tabIndex={isExpandable ? 0 : undefined}
+            aria-expanded={isExpandable ? isOpen : undefined}
+            aria-controls={isExpandable ? panelId : undefined}
           >
             <div className={`absolute left-0 top-0 bottom-0 w-[3px] rounded-r-full ${zoneRail}`} />
             <div className={`absolute right-0 top-0 bottom-0 w-[3px] rounded-l-full ${zoneRail}`} />
@@ -373,8 +493,32 @@ function StandingsTable({
               <span className="w-10 text-right text-sm font-bold text-orange-400 tabular-nums">
                 <CountUp value={s.points} delay={rowDelay * 1000 + 200} />
               </span>
+              <span className="flex w-5 shrink-0 items-center justify-center self-center">
+                {isExpandable && (
+                  <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+                )}
+              </span>
             </div>
           </motion.div>
+          <AnimatePresence initial={false}>
+            {isOpen && playerId && (
+              <motion.div
+                key={`panel-${playerId}`}
+                initial={reduceMotion ? false : { height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={reduceMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
+                transition={{ duration: reduceMotion ? 0 : 0.2, ease: 'easeOut' }}
+                style={{ overflow: 'hidden' }}
+              >
+                <PlayerStatsPanel
+                  id={panelId!}
+                  winPct={s.winPct ?? 0}
+                  form={s.form ?? []}
+                  streak={s.streak ?? null}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
           </div>
         );
       })}
