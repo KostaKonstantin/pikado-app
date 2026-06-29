@@ -70,3 +70,21 @@ describe('ShareService.buildStandings — stats fields', () => {
     expect(a.streak).toBeNull();
   });
 });
+
+describe('ShareService.computeProgress — schedule progress', () => {
+  it('derives total from the double round-robin formula (31 players → 930)', () => {
+    expect(ShareService.computeProgress(31, true, 930)).toEqual({ played: 930, total: 930 });
+  });
+
+  it('matches the baraž example (12 players, 21 played → 21/132)', () => {
+    expect(ShareService.computeProgress(12, true, 21)).toEqual({ played: 21, total: 132 });
+  });
+
+  it('uses single round-robin total when not home/away', () => {
+    expect(ShareService.computeProgress(10, false, 0)).toEqual({ played: 0, total: 45 });
+  });
+
+  it('returns total 0 for a phase with fewer than 2 players', () => {
+    expect(ShareService.computeProgress(1, true, 0)).toEqual({ played: 0, total: 0 });
+  });
+});

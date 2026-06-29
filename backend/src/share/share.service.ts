@@ -9,8 +9,9 @@ import { LeagueMatch } from '../leagues/entities/league-match.entity';
 import { LeagueSession } from '../leagues/entities/league-session.entity';
 import { CompetitionPhase } from '../leagues/entities/competition-phase.entity';
 import { Player } from '../players/entities/player.entity';
-import { MatchStatus } from '../common/enums';
+import { MatchStatus, LeagueFormat } from '../common/enums';
 import { buildPlayerForm, winPercent } from './player-form';
+import { rrStats } from '../leagues/fixture.service';
 
 @Injectable()
 export class ShareService {
@@ -65,6 +66,19 @@ export class ShareService {
       isPostponed: m.isPostponed,
       scheduledDate: m.scheduledDate,
     };
+  }
+
+  /**
+   * Phase/season progress for the public page: how many matches are played
+   * out of the total the round-robin schedule will ever have.
+   *
+   * `total` comes from the schedule FORMULA (rrStats), exactly like the admin
+   * dashboard's getScheduleStats — so it is correct even before every match is
+   * generated or assigned to a Ligaški Dan (EuroLeague). `played` counts
+   * COMPLETED matches only (walkover is not counted), matching the admin.
+   */
+  static computeProgress(playerCount: number, homeAway: boolean, completedCount: number) {
+    return { played: completedCount, total: rrStats(playerCount, homeAway).totalMatches };
   }
 
   private buildStandings(
@@ -339,6 +353,14 @@ export class ShareService {
             .map(([round, matches]) => ({ label: round, matches }));
         }
 
+        const progress = phase.type === 'round_robin'
+          ? ShareService.computeProgress(
+              phase.playerIds.length,
+              true, // all competition phases are double round-robin
+              phaseMatches.filter(m => m.status === MatchStatus.COMPLETED).length,
+            )
+          : null;
+
         return {
           id: phase.id,
           name: phase.name,
@@ -347,8 +369,15 @@ export class ShareService {
           phaseOrder: phase.phaseOrder,
           standings: phaseStandings,
           groups: phaseGroups,
+          progress,
         };
       }),
+    );
+
+    const regularProgress = ShareService.computeProgress(
+      regularPlayers.length,
+      league.format === LeagueFormat.HOME_AWAY,
+      regularCompleted.length,
     );
 
     return {
@@ -363,6 +392,7 @@ export class ShareService {
       groups,
       isEuroleague,
       phases: phasesData,
+      progress: regularProgress,
     };
   }
 }

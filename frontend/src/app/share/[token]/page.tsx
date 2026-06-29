@@ -37,6 +37,8 @@ type MatchRow = {
 
 type Group = { label: number; sessionStatus?: string; matches: MatchRow[] };
 
+type Progress = { played: number; total: number };
+
 type PhaseData = {
   id: string; name: string;
   type: 'round_robin' | 'knockout';
@@ -44,6 +46,7 @@ type PhaseData = {
   phaseOrder: number;
   standings: StandingRow[];
   groups: Group[];
+  progress?: Progress | null;
 };
 
 type ShareData = {
@@ -52,6 +55,7 @@ type ShareData = {
   groups: Group[];
   isEuroleague: boolean;
   phases: PhaseData[];
+  progress?: Progress;
 };
 
 type ActiveTab = 'tabela' | 'mecevi' | 'dvoboji';
@@ -959,6 +963,42 @@ function GuidePanel({
   );
 }
 
+function PhaseProgressBar({ progress }: { progress: Progress }) {
+  const { played, total } = progress;
+  if (total <= 0) return null;
+  const pct = Math.min(100, Math.round((played / total) * 100));
+  const done = played >= total;
+  return (
+    <div className="px-3 pb-2.5">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
+          {done
+            ? <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+            : <Clock className="h-3 w-3 text-orange-400" />}
+          {done ? 'Završeno' : 'Odigrano'}
+        </span>
+        <span className="text-[11px] font-semibold tabular-nums">
+          <span className={done ? 'text-emerald-400' : 'text-orange-400'}>{played}</span>
+          <span className="text-slate-500"> / {total} · {pct}%</span>
+        </span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
+        <motion.div
+          className="h-full rounded-full"
+          style={{
+            background: done
+              ? 'linear-gradient(90deg, #34d399, #10b981)'
+              : 'linear-gradient(90deg, #fb923c, #f97316)',
+          }}
+          initial={{ width: 0 }}
+          animate={{ width: `${pct}%` }}
+          transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function SegmentedControl({
   items,
   activeId,
@@ -1290,6 +1330,7 @@ export default function SharePage() {
     : [];
 
   const activePhase = data?.phases?.find(p => p.id === activePhaseKey);
+  const activeProgress = activePhaseKey === 'regular' ? data?.progress : activePhase?.progress;
   const regularMatchGroups = data?.isEuroleague ? orderEuroleagueMatchGroups(data.groups) : data?.groups ?? [];
   const activePhaseMatchGroups = activePhase && data?.isEuroleague && activePhase.type !== 'knockout'
     ? orderEuroleagueMatchGroups(activePhase.groups)
@@ -1669,6 +1710,11 @@ export default function SharePage() {
               </div>
             );
           })()}
+
+          {/* Napredak faze — odigrano/ukupno za izabranu fazu */}
+          {activeProgress && activeProgress.total > 0 && (
+            <PhaseProgressBar progress={activeProgress} />
+          )}
         </div>
       </div>
 
