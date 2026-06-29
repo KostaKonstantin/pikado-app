@@ -1266,9 +1266,9 @@ export default function SharePage() {
   const allMatches = data ? data.groups.flatMap(g => g.matches) : [];
   const expectedPerPair = data?.league.format === 'home_away' ? 2 : 1;
   const dvobojiPlayers = data ? data.standings.map(s => s.player).filter(Boolean) as Player[] : [];
-  const selectedPlayer = dvobojiPlayerId
+  const selectedPlayer = (dvobojiPlayerId
     ? dvobojiPlayers.find((p) => p.id === dvobojiPlayerId)
-    : undefined;
+    : undefined) ?? dvobojiPlayers[0];
 
   const dvobojiOpponents = selectedPlayer
     ? dvobojiPlayers
@@ -1306,9 +1306,9 @@ export default function SharePage() {
   /* Dvoboji data for active phase */
   const phaseAllMatches = activePhase ? activePhase.groups.flatMap(g => g.matches) : [];
   const phasePlayers = activePhase ? activePhase.standings.map(s => s.player).filter(Boolean) as Player[] : [];
-  const phaseSelectedPlayer = dvobojiPlayerId
+  const phaseSelectedPlayer = (dvobojiPlayerId
     ? phasePlayers.find((p) => p.id === dvobojiPlayerId)
-    : undefined;
+    : undefined) ?? phasePlayers[0];
   const phaseOpponents = phaseSelectedPlayer
     ? phasePlayers
         .filter(p => p.id !== phaseSelectedPlayer.id)
@@ -1732,7 +1732,7 @@ export default function SharePage() {
                     <DvobojiTab
                       players={phasePlayers}
                       opponents={phaseOpponents}
-                      selectedPlayerId={dvobojiPlayerId || phaseSelectedPlayer?.id || ''}
+                      selectedPlayerId={phaseSelectedPlayer?.id || ''}
                       expectedPerPair={expectedPerPair}
                       onPlayerChange={(id) => { setDvobojiPlayerId(id); setExpandedPairs(new Set()); }}
                       expandedPairs={expandedPairs}
@@ -1767,7 +1767,7 @@ export default function SharePage() {
                     <DvobojiTab
                       players={dvobojiPlayers}
                       opponents={dvobojiOpponents}
-                      selectedPlayerId={dvobojiPlayerId || selectedPlayer?.id || ''}
+                      selectedPlayerId={selectedPlayer?.id || ''}
                       expectedPerPair={expectedPerPair}
                       onPlayerChange={(id) => { setDvobojiPlayerId(id); setExpandedPairs(new Set()); }}
                       expandedPairs={expandedPairs}
